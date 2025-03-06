@@ -2,7 +2,8 @@
 <div align="center">
 
 # **MIAO AI** <!-- omit in toc -->
-
+https://github.com/MIAOAI-Subnet/MIAOAI_SUBNET
+![hero](./asset/offline.png)
 ### Bridging Pet Tech and Blockchain Innovation <!-- omit in toc -->
 
 
