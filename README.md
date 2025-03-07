@@ -1,4 +1,4 @@
-
+![image](https://github.com/user-attachments/assets/3ebb3ae2-a178-4241-b26a-e21180fd0662)
 <div align="center">
 
 # **MIAO AI** <!-- omit in toc -->
@@ -13,19 +13,24 @@ https://github.com/MIAOAI-Subnet/MIAOAI_SUBNET
 
 #  Introduction
 
-MIAOAI is a cat-themed AI-MEME subnet on the Bittensor, crafted to build a decentralized AI community centered on cat behavior analysis and bionics. Designed for cat lovers, AI enthusiasts, and developers, MIAOAI harnesses cutting-edge AI to explore the intersection of feline communication, AI innovation, and meme culture, creating a unique and engaging experience.
+MIAOAI is a cat-themed AI-MEME subnet dedicated to creating and interacting with cat-inspired audio content, fostering a playful and entertaining decentralized community for cat lovers and meme enthusiasts.
 
-# What is MIAOAI?
-MIAOAI is a cat-themed AI-MEME subnet on the Bittensor ecosystem, designed to create an engaging and entertaining community through cat-inspired applications. We aim to build a vibrant ecosystem where users can:
--  Interact with Digital Cats: Generate digital twin cats from your Miao sounds, enabling immersive experiences like AR games, social platform interactions, or virtual pet simulations where your cat can "respond" to commands or mimic real-life behaviors.
--  Enjoy Cat-Themed Entertainment: Create and share cat-inspired audio memes (e.g., turning songs or speech into cat sounds) on platforms like X and Instagram, earning rewards based on social engagement and spreading the fun of Miao culture.
+# Overview
+This repository powers MIAOAI's ability to generate and manipulate cat vocalizations (e.g., meows, purrs, hisses) for interactive and entertainment purposes. Integrated into the MIAOAI DApp, it allows users to create cat sounds, interact with virtual cat agents, and share meme-worthy audio content, all while earning $MIAO tokens as rewards.
 
-# Core Algorithm
-- Audio Feature Extraction: VGGish + STFT - Initially, the VGGish model is used to extract features from audio data.
-- Audio Classification: Audio Spectrogram Transformer (AST) - AST is a Transformer model specifically designed for audio data, utilizing self-attention mechanisms to process spectrograms.
-- Sound Event Classification: Our method to differentiate “non-dog bark” sounds uses a dual contrastive learning strategy. This involves a “negative sample provisioning” approach where we select and strengthen learning on sounds that could be mistaken for dog barks, thus improving the model’s ability to discriminate between different sounds.
+# Key Features
+
+•	Cat Sound Generation: Synthesize unique cat vocalizations based on user inputs or emotional prompts (e.g., "playful meow," "curious purr"), creating personalized cat audio clips.
+•	Interactive Virtual Cats: Generate digital cat agents that "speak" using synthesized sounds, enabling fun interactions in AR environments, social platforms, or virtual pet games.
+•	Meme Audio Creation: Transform user-uploaded audio (e.g., songs, speech) into cat-themed versions using style transfer, perfect for sharing on platforms like X and Instagram.
+•	Community Rewards: Earn 10-50 $MIAO tokens per generated audio clip or interaction, with additional bonuses for social media engagement (e.g., likes, shares).
 
 # Model Performance Comparison
+
+MIAOAI's audio generation and interaction system is built on advanced audio synthesis and processing techniques:
+•	WaveNet: A generative model for producing realistic cat vocalizations, trained on a diverse dataset of cat sounds to capture nuances like pitch and tone.
+•	Audio Style Transfer with GANs: Uses Generative Adversarial Networks to transform user audio into cat-like sounds, preserving the rhythm while infusing feline characteristics.
+•	Emotion-Driven Synthesis: Incorporates a lightweight emotion encoder to adjust generated sounds based on user-selected moods (e.g., happy, curious, sleepy).
 
 <img width="416" alt="image" src="https://github.com/user-attachments/assets/a25d4cc0-bbca-4f74-b587-852a706e800e">
 
@@ -82,5 +87,5 @@ btcli wallet overview --wallet.name validator --netuid 319 --subtensor.network t
 
 # Notice
 The model always stays on your machine and is yours!
-The data provided by our community friends and the benefits and efficiency brought by running in the subnet will better help us train the dog model
+The data provided by our community friends and the benefits and efficiency brought by running in the subnet will better help us train the cat model
 
