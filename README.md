@@ -19,17 +19,17 @@ This repository powers MIAOAI's ability to generate and manipulate cat vocalizat
 
 # Key Features
 
-•	Cat Sound Generation: Synthesize unique cat vocalizations based on user inputs or emotional prompts (e.g., "playful meow," "curious purr"), creating personalized cat audio clips.
-•	Interactive Virtual Cats: Generate digital cat agents that "speak" using synthesized sounds, enabling fun interactions in AR environments, social platforms, or virtual pet games.
-•	Meme Audio Creation: Transform user-uploaded audio (e.g., songs, speech) into cat-themed versions using style transfer, perfect for sharing on platforms like X and Instagram.
-•	Community Rewards: Earn 10-50 $MIAO tokens per generated audio clip or interaction, with additional bonuses for social media engagement (e.g., likes, shares).
+- Cat Sound Generation: Synthesize unique cat vocalizations based on user inputs or emotional prompts (e.g., "playful meow," "curious purr"), creating personalized cat audio clips.
+-	 Interactive Virtual Cats: Generate digital cat agents that "speak" using synthesized sounds, enabling fun interactions in AR environments, social platforms, or virtual pet games.
+-	 Meme Audio Creation: Transform user-uploaded audio (e.g., songs, speech) into cat-themed versions using style transfer, perfect for sharing on platforms like X and Instagram.
+-	 Community Rewards: Earn 10-50 $MIAO tokens per generated audio clip or interaction, with additional bonuses for social media engagement (e.g., likes, shares).
 
 # Model Performance Comparison
 
 MIAOAI's audio generation and interaction system is built on advanced audio synthesis and processing techniques:
-•	WaveNet: A generative model for producing realistic cat vocalizations, trained on a diverse dataset of cat sounds to capture nuances like pitch and tone.
-•	Audio Style Transfer with GANs: Uses Generative Adversarial Networks to transform user audio into cat-like sounds, preserving the rhythm while infusing feline characteristics.
-•	Emotion-Driven Synthesis: Incorporates a lightweight emotion encoder to adjust generated sounds based on user-selected moods (e.g., happy, curious, sleepy).
+-	WaveNet: A generative model for producing realistic cat vocalizations, trained on a diverse dataset of cat sounds to capture nuances like pitch and tone.
+-	Audio Style Transfer with GANs: Uses Generative Adversarial Networks to transform user audio into cat-like sounds, preserving the rhythm while infusing feline characteristics.
+-	Emotion-Driven Synthesis: Incorporates a lightweight emotion encoder to adjust generated sounds based on user-selected moods (e.g., happy, curious, sleepy).
 
 <img width="416" alt="image" src="https://github.com/user-attachments/assets/a25d4cc0-bbca-4f74-b587-852a706e800e">
 
