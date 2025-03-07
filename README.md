@@ -1,4 +1,3 @@
-![image](https://github.com/user-attachments/assets/3ebb3ae2-a178-4241-b26a-e21180fd0662)
 <div align="center">
 
 # **MIAO AI** <!-- omit in toc -->
