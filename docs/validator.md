@@ -1,10 +1,10 @@
 # Full instructions for setup
 
-Welcome to WOOFAI Validator 🔥
+Welcome to MIAOAI Validator 🔥
 
 ## Setup environment
 ```bash
-git clone https://github.com/Woof-AI/WOOFAI_Subnet
+git clone https://github.com/MIAO-AI/MIAOAI_Subnet
 ```
 
 ### Install system dependencies
@@ -31,11 +31,11 @@ btcli wallet create
 ```
 ## Register your validator
 ```bash
-btcli subnet register --netuid 248 --subtensor.network test --wallet.name validator --wallet.hotkey validator
+btcli subnet register --netuid 319 --subtensor.network test --wallet.name validator --wallet.hotkey validator
 ```
 
 ## Start validator
 ```bash
-python neurons/miner.py --netuid 248 --subtensor.network test --wallet.name miner --wallet.hotkey miner --logging.debug
+python neurons/miner.py --netuid 319 --subtensor.network test --wallet.name miner --wallet.hotkey miner --logging.debug
 ```
 
