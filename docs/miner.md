@@ -1,6 +1,6 @@
 # Full instructions for setup
 
-Welcome to WOOFAI Mining 🔥
+Welcome to MIAOAI Mining 🔥
 
 # Overview
 A miner consists of several parts, fitting into two categories:
@@ -12,7 +12,7 @@ Because of the existence of JIN, you don’t need to pay attention to the proxy,
 
 ## Setup environment
 ```bash
-git clone https://github.com/Woof-AI/WOOFAI_Subnet
+git clone https://github.com/MIAO-AI/MIAOAI_Subnet
 ```
 
 ### Install system dependencies
@@ -39,12 +39,12 @@ btcli wallet create
 ```
 ## Register your miner
 ```bash
-btcli subnet register --netuid 248 --subtensor.network test --wallet.name miner --wallet.hotkey miner
+btcli subnet register --netuid 319 --subtensor.network test --wallet.name miner --wallet.hotkey miner
 ```
 ## Start up your model
 ```bash
-git clone https://github.com/Woof-AI/WOOF-recognition
-cd WOOF-recognition
+git clone https://github.com/MIAO-AI/MIAO-recognition
+cd MIAO-recognition
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
@@ -57,6 +57,6 @@ export AI_API_URL="your_model_url"
 ```
 ## Start miners
 ```bash
-python neurons/miner.py --netuid 248 --subtensor.network test --wallet.name miner --wallet.hotkey miner --logging.debug
+python neurons/miner.py --netuid 319 --subtensor.network test --wallet.name miner --wallet.hotkey miner --logging.debug
 ```
 
