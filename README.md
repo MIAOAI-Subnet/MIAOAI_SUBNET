@@ -71,17 +71,17 @@ pip install -e .
 
 ### start miner
 ```bash
-python neurons/miner.py --netuid 319 --subtensor.network test --wallet.name miner --wallet.hotkey miner --logging.debug
+python neurons/miner.py --netuid 84  --wallet.name miner --wallet.hotkey miner --logging.debug
 ```
 
 ### start validator
 ```bash
-python neurons/validator.py --netuid 319 --subtensor.network test --wallet.name validator1 --wallet.hotkey validator1 --logging.debug 
+python neurons/validator.py --netuid 84  --wallet.name validator1 --wallet.hotkey validator1 --logging.debug 
 ```
 ### check state
 ```bash
-btcli wallet overview --wallet.name miner --netuid 319 --subtensor.network test
-btcli wallet overview --wallet.name validator --netuid 319 --subtensor.network test
+btcli wallet overview --wallet.name miner --netuid 84
+btcli wallet overview --wallet.name validator --netuid 84 
 ```
 
 # Notice
