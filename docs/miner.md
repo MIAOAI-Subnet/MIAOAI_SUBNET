@@ -39,7 +39,7 @@ btcli wallet create
 ```
 ## Register your miner
 ```bash
-btcli subnet register --netuid 319 --subtensor.network test --wallet.name miner --wallet.hotkey miner
+btcli subnet register --netuid 84  --wallet.name miner --wallet.hotkey miner
 ```
 ## Start up your model
 ```bash
@@ -57,6 +57,6 @@ export AI_API_URL="your_model_url"
 ```
 ## Start miners
 ```bash
-python neurons/miner.py --netuid 319 --subtensor.network test --wallet.name miner --wallet.hotkey miner --logging.debug
+python neurons/miner.py --netuid 84  --wallet.name miner --wallet.hotkey miner --logging.debug
 ```
 
