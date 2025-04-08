@@ -31,11 +31,11 @@ btcli wallet create
 ```
 ## Register your validator
 ```bash
-btcli subnet register --netuid 319 --subtensor.network test --wallet.name validator --wallet.hotkey validator
+btcli subnet register --netuid 84  --wallet.name validator --wallet.hotkey validator
 ```
 
 ## Start validator
 ```bash
-python neurons/miner.py --netuid 319 --subtensor.network test --wallet.name miner --wallet.hotkey miner --logging.debug
+python neurons/miner.py --netuid 84  --wallet.name miner --wallet.hotkey miner --logging.debug
 ```
 
