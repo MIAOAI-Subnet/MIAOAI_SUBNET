@@ -1,3 +1,5 @@
+# MIT
+# Copyright   MIAO
 import os
 import time
 import typing
