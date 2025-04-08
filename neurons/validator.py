@@ -1,5 +1,5 @@
 # MIT License
-# Copyright © 2023 Yuma Rao
+# Copyright © 2025 MIAO
 
 import time
 import bittensor as bt
