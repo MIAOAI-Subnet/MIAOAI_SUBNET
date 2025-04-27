@@ -19,26 +19,26 @@ class DogSoundProtocol(bt.Synapse):
 
     def deserialize(self) -> dict:
         return {
-            'is_dog_sound': self.is_dog_sound,
+            'is_animal_sound': self.is_aniaml_sound,
             'probability': self.probability,
             'response_time': self.response_time
         }
 
 
 wallet = bt.wallet(
-    name='fish',
-    hotkey='fish',
+    name='example',
+    hotkey='example',
     path='/ubuntu/.bittensor/wallets'
 )
-subnet = bt.metagraph(netuid=248)
+subnet = bt.metagraph(netuid=86)
 dendrite = bt.dendrite(wallet=wallet)
 
 @app.post("/recognize")
-async def recognize_dog_sound(request: AudioRequest):  
+async def recognize_animal_sound(request: AudioRequest):  
     
     responses = await dendrite(
         axons=subnet.axons,
-        synapse=DogSoundProtocol(audio_data=request.audio_data),
+        synapse=animalSoundProtocol(audio_data=request.audio_data),
         timeout=12
     )
 
