@@ -11,9 +11,9 @@ class AudioRequest(BaseModel):
     audio_data: str
 
 
-class DogSoundProtocol(bt.Synapse):
+class AnimalSoundProtocol(bt.Synapse):
     audio_data: str
-    is_dog_sound: Optional[bool] = None
+    is_animal_sound: Optional[bool] = None
     probability: Optional[float] = None
     response_time: Optional[float] = None
 
