@@ -50,7 +50,7 @@ git clone https://github.com/MIAO-AI/MIAOAI_Subnet
 python3 -m venv btcli_venv
 source btcli_venv/bin/activate
 
-# setuo bittensor sdk
+# setup bittensor sdk
 pip install bittensor
 pip install -e .
 ```
@@ -83,5 +83,5 @@ btcli wallet overview --wallet.name validator --netuid 86
 
 # Notice
 The model always stays on your machine and is yours!
-The data provided by our community friends and the benefits and efficiency brought by running in the subnet will better help us train the cat model
+The data provided by our community friends and the benefits and efficiency brought by running in the subnet will better help us train the animal-sound model
 
