@@ -46,7 +46,7 @@ This tutorial shows how to  run incentives on it using the our testnet.
 ## Preparation
 #### prepare subnet
 ```bash
-git clone https://github.com/MIAO-AI/MIAOAI_Subnet
+git clone https://github.com/MIAOAI-Subnet/MIAOAI_SUBNET
 python3 -m venv btcli_venv
 source btcli_venv/bin/activate
 
