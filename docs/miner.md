@@ -12,7 +12,7 @@ Because of the existence of JIN, you don’t need to pay attention to the proxy,
 
 ## Setup environment
 ```bash
-git clone https://github.com/MIAO-AI/MIAOAI_Subnet
+git clone https://github.com/MIAOAI-Subnet/MIAOAI_SUBNET
 ```
 
 ### Install system dependencies
