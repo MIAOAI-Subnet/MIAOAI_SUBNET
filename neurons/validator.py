@@ -28,19 +28,16 @@ class Validator(BaseValidatorNeuron):
     async def forward(
         self, synapse: template.protocol.CatSoundProtocol
     ) -> template.protocol.CatSoundProtocol:
-        """
-        处理验证请求，验证鉴别猫叫声的能力
-        """
+    
         
-        bt.logging.info(f"验证请求从UID={synapse.dendrite.uid}")
+        bt.logging.info(f"Validation request从UID={synapse.dendrite.uid}")
         
-        # 这里应该放置验证逻辑
-        # 在实际的验证器中，应该实现真实的逻辑来测试矿工的能力
+
         
         if synapse.is_cat_sound is not None:
-            bt.logging.info(f"矿工发现了猫叫声: {synapse.is_cat_sound}, 概率: {synapse.probability}")
+            bt.logging.info(f"sound: {synapse.is_cat_sound}, Probability: {synapse.probability}")
         else:
-            bt.logging.warning("矿工未返回有效响应")
+            bt.logging.warning("Miners did not return a valid response")
         
         return synapse
 
