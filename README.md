@@ -1,6 +1,6 @@
 <div align="center">
 
-# **MIAO AI** <!-- omit in toc -->
+# **MIAOAI** <!-- omit in toc -->
 ![hero](./asset/offline.jpg)
 ### Bridging Pet Tech and Blockchain Innovation <!-- omit in toc -->
 
