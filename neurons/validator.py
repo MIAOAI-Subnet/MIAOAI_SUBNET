@@ -3,8 +3,8 @@
 
 import time
 import bittensor as bt
-from ..template.base.validator import BaseValidatorNeuron
-from ..template.validator import forward
+from MIAOAI_SUBNET.template.base.validator import BaseValidatorNeuron
+from MIAOAI_SUBNET.template.validator import forward
 
 class Validator(BaseValidatorNeuron):
     def __init__(self, config=None):
