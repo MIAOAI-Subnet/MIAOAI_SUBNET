@@ -56,7 +56,7 @@ pip install -e .
 ```
 ##  1.running MIAO-recognition
 ```bash
- git clone https://github.com/MIAO-AI/MIAO-recognition
+ git clone https://github.com/MIAOAI-Subnet/MIAO-recognition
 
  cd MIAO-recognition
 
