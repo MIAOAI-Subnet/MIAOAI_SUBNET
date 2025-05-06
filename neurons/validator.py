@@ -2,18 +2,20 @@
 # Copyright © 2025 MIAO
 
 import time
-import bittensor as bt
-import asyncio
-import base64
-import numpy as np
 import os
 import json
 import random
+import base64
 import hashlib
 import hmac
+import asyncio
+
+import bittensor as bt
+import numpy as np
+import torch
+
 from template.base.validator import BaseValidatorNeuron
 from template.protocol import CatSoundProtocol
-import torch
 
 
 class Validator(BaseValidatorNeuron):
@@ -28,7 +30,7 @@ class Validator(BaseValidatorNeuron):
             config.neuron.validation_interval = 5
             config.neuron.sample_size = 2
 
-        # Initialize attributes before parent class initialization
+        # 初始化历史与状态容器
         self.miner_history = {}
         self.miner_model_status = {}
         self.test_round = 0
@@ -38,15 +40,14 @@ class Validator(BaseValidatorNeuron):
         self.min_dtao_balance = 50.0
         self.miner_dtao_balance = {}
         self.last_balance_check = {}
+        # 本轮分数
+        self.scores = {}
 
         super(Validator, self).__init__(config=config)
-
         bt.logging.info("Loading validator status")
 
         self.test_database = self.initialize_test_database()
         self.load_state()
-        # initialize per-round scores
-        self.scores = {}
 
     def initialize_test_database(self):
         return {
@@ -63,7 +64,7 @@ class Validator(BaseValidatorNeuron):
             hotkey = getattr(synapse.dendrite, 'hotkey', None)
             bt.logging.info(f"Validation request from UUID={getattr(synapse.dendrite, 'uuid', 'Unknown')}")
 
-            # pick hidden vs normal test
+            # 90% 发送 hidden test, 10% 普通 test
             if random.random() < 0.9:
                 test_id, is_cat = self.select_test_sample()
                 encoded = self._create_special_test(test_id)
@@ -71,20 +72,18 @@ class Validator(BaseValidatorNeuron):
                 test_id, is_cat = self.select_test_sample()
                 encoded = base64.b64encode(f"TEST:{test_id}".encode()).decode('utf-8')
 
-            # first call: send test
+            # 首次发包
             if not hasattr(synapse, 'sent_once'):
-                synapse.audio_data = encoded
-                synapse.sent_once = True
-                # attach ground truth for later scoring
-                synapse.sample_id = test_id
-                synapse.ground_truth = is_cat
+                synapse.audio_data    = encoded
+                synapse.sent_once     = True
+                synapse.sample_id     = test_id
+                synapse.ground_truth  = is_cat
             else:
-                # process previous result, then send new test
+                # 处理上一次返回，再发新包
                 self.process_test_results(synapse)
-                synapse.audio_data = encoded
-                # attach for next round
-                synapse.sample_id = test_id
-                synapse.ground_truth = is_cat
+                synapse.audio_data    = encoded
+                synapse.sample_id     = test_id
+                synapse.ground_truth  = is_cat
 
         except Exception as e:
             bt.logging.error(f"Error in forward(): {e}")
@@ -142,19 +141,19 @@ class Validator(BaseValidatorNeuron):
             "special_test_success": False,
         })
 
-        # if special test, verify
+        # special test 验证
         if "::" in getattr(synapse, 'audio_data', ''):
             if self._verify_special_response(synapse, hotkey):
                 hist["special_test_success"] = True
 
         hist["total_tests"] += 1
 
-        # correctness via ground truth attached earlier
+        # 根据 ground_truth 判断正确性
         is_correct = synapse.is_cat_sound == getattr(synapse, 'ground_truth', False)
         if is_correct:
             hist["correct_tests"] += 1
 
-        # record response time & last responses
+        # 记录延迟与历史响应
         if synapse.response_time is not None:
             hist["response_times"].append(synapse.response_time)
         hist["last_responses"].append({
@@ -165,11 +164,11 @@ class Validator(BaseValidatorNeuron):
         if len(hist["last_responses"]) > 5:
             hist["last_responses"].pop(0)
 
-        # update balances and model usage
+        # 更新 dTAO 余额与模型使用状态
         self.check_dtao_balance(hotkey)
         self.detect_model_usage(hotkey)
 
-        # compute final score
+        # 计算分数
         score = self.calculate_score(hotkey, synapse, is_correct)
         self.scores[uid] = score
         bt.logging.info(f"Miner {uid} score: {score}")
@@ -230,7 +229,7 @@ class Validator(BaseValidatorNeuron):
         return 1.0
 
     async def create_synapse(self) -> CatSoundProtocol:
-        # just create and return—no score clearing here
+        # 清分数交给 concurrent_forward 统一做
         if random.random() < 0.9:
             test_id, is_cat = self.select_test_sample()
             audio = self._create_special_test(test_id)
@@ -244,7 +243,7 @@ class Validator(BaseValidatorNeuron):
         return syn
 
     async def concurrent_forward(self):
-        # clear last round
+        # 清空上一轮分数
         self.scores.clear()
         try:
             tasks = [ self.forward(await self.create_synapse())
@@ -255,14 +254,49 @@ class Validator(BaseValidatorNeuron):
             if self.test_round % 10 == 0:
                 self.save_state()
 
-            # commit to chain
-            await super(Validator, self).concurrent_forward()
+            # 上链设置权重
+            self.set_weights()
 
         except Exception as e:
             bt.logging.error(f"concurrent_forward() error: {e}")
 
     def score(self, uid: int) -> float:
         return self.scores.get(uid, 0.0)
+
+
+    def set_weights(self):
+        """
+        收集本轮分数，只对链上活跃矿工做归一化与缩放，
+        保证非零权重之和 == 活跃矿工数量，非活跃矿工权重始终为 0。
+        """
+        try:
+            n = self.metagraph.n
+            active = self.metagraph.active.to(torch.bool)
+            scores = torch.zeros(n)
+            for uid in range(n):
+                scores[uid] = self.score(uid)
+
+            alive = scores[active]
+            if alive.sum().item() == 0:
+                scores[active] = 1.0
+                alive = scores[active]
+
+            scores[active] = alive / alive.sum()
+            total_active = float(active.sum().item())
+            scores[active] = scores[active] * total_active
+
+            uids = torch.arange(n, dtype=torch.long)
+            self.subtensor.set_weights(
+                netuid = self.config.netuid,
+                wallet = self.wallet,
+                uids   = uids,
+                weights= scores,
+                wait_for_inclusion = True
+            )
+            bt.logging.info(f"设置权重完成：活跃矿工={int(total_active)}，权重之和={scores.sum().item():.3f}")
+        except Exception as e:
+            bt.logging.error(f"设置权重失败：{e}")
+
 
     def save_state(self):
         try:
@@ -288,17 +322,17 @@ class Validator(BaseValidatorNeuron):
             if os.path.exists(path):
                 with open(path, 'r') as f:
                     data = json.load(f)
-                self.miner_history        = data.get("miner_history", {})
-                self.miner_model_status   = data.get("miner_model_status", {})
-                self.test_round           = data.get("test_round", 0)
+                self.miner_history         = data.get("miner_history", {})
+                self.miner_model_status    = data.get("miner_model_status", {})
+                self.test_round            = data.get("test_round", 0)
                 self._special_aware_miners = set(data.get("_special_aware_miners", []))
-                self.miner_dtao_balance   = data.get("miner_dtao_balance", {})
-                self.last_balance_check   = data.get("last_balance_check", {})
+                self.miner_dtao_balance    = data.get("miner_dtao_balance", {})
+                self.last_balance_check    = data.get("last_balance_check", {})
             bt.logging.info("Validator state loaded")
         except Exception as e:
             bt.logging.error(f"load_state() error: {e}")
-        # ensure scores dict
         self.scores = {}
+
 
 def get_config():
     import argparse
@@ -310,6 +344,7 @@ def get_config():
     parser.add_argument("--neuron.validation_interval", type=int, default=5, help="Seconds")
     parser.add_argument("--neuron.sample_size",        type=int, default=10, help="Samples/round")
     return bt.config(parser)
+
 
 if __name__ == "__main__":
     config = get_config()
