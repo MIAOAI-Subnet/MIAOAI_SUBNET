@@ -43,6 +43,8 @@ class Validator(BaseValidatorNeuron):
         self.min_dtao_balance = 50.0
         self.miner_dtao_balance = {}
         self.last_balance_check = {}
+        # 初始化分数字典
+        self.scores = {}
 
         # Call parent class initialization method
         super(Validator, self).__init__(config=config)
@@ -89,7 +91,8 @@ class Validator(BaseValidatorNeuron):
             hotkey = synapse.dendrite.hotkey if hasattr(synapse, 'dendrite') and hasattr(synapse.dendrite,
                                                                                          'hotkey') else None
 
-            bt.logging.info(f"Validation request from UUID={synapse.dendrite.uuid if hasattr(synapse, 'dendrite') else 'Unknown'}")
+            bt.logging.info(
+                f"Validation request from UUID={synapse.dendrite.uuid if hasattr(synapse, 'dendrite') else 'Unknown'}")
 
             should_send_special_test = random.random() < 0.9
             should_send_auth_test = not should_send_special_test and random.random() < 0.1
@@ -167,10 +170,10 @@ class Validator(BaseValidatorNeuron):
     def select_test_sample(self):
         test_keys = list(self.test_database.keys())
         test_keys = [key for key in test_keys if not self.test_database[key].get("requires_auth", False)]
-        
+
         test_id = random.choice(test_keys)
         is_cat = self.test_database[test_id]["is_cat"]
-        
+
         return test_id, is_cat
 
     def process_test_results(self, synapse):
@@ -266,21 +269,21 @@ class Validator(BaseValidatorNeuron):
             return signature == expected_signature
         except:
             return False
-    
+
     def check_dtao_balance(self, hotkey):
         current_time = time.time()
-        if (hotkey in self.last_balance_check and 
-            current_time - self.last_balance_check.get(hotkey, 0) < 3600):
+        if (hotkey in self.last_balance_check and
+                current_time - self.last_balance_check.get(hotkey, 0) < 3600):
             return
-        
+
         try:
             balance = float(self.metagraph.S[self.metagraph.hotkeys.index(hotkey)]) * 1000
-            
+
             self.miner_dtao_balance[hotkey] = balance
             self.last_balance_check[hotkey] = current_time
-            
+
             bt.logging.debug(f"Miner {hotkey} dTAO balance: {balance}")
-            
+
         except Exception as e:
             if hotkey not in self.miner_dtao_balance:
                 self.miner_dtao_balance[hotkey] = 0.0
@@ -305,27 +308,28 @@ class Validator(BaseValidatorNeuron):
 
             last_responses = history.get("last_responses", [])
             if len(last_responses) >= 3:
-                same_result = all(r.get("is_cat_sound") == last_responses[0].get("is_cat_sound", False) for r in last_responses)
-                
+                same_result = all(
+                    r.get("is_cat_sound") == last_responses[0].get("is_cat_sound", False) for r in last_responses)
+
                 probs = [r.get("probability", 0.0) for r in last_responses if r.get("probability") is not None]
                 same_prob = False
                 if probs and len(probs) >= 3:
                     prob_std = np.std(probs)
                     same_prob = prob_std < 0.01
-                
+
                 response_variability = not (same_result and same_prob)
             else:
                 response_variability = True
 
             handles_special_tests = hotkey in self._special_aware_miners
-            
+
             uses_real_model = (
-                accuracy >= 0.6 and 
-                time_reasonable and 
-                time_variability and 
-                response_variability
+                    accuracy >= 0.6 and
+                    time_reasonable and
+                    time_variability and
+                    response_variability
             )
-            
+
             if handles_special_tests:
                 uses_real_model = True
 
@@ -337,47 +341,80 @@ class Validator(BaseValidatorNeuron):
             return None
 
     def calculate_score(self, hotkey, synapse, is_correct):
+        # 检查余额
         balance = self.miner_dtao_balance.get(hotkey, 0.0)
         if balance < self.min_dtao_balance:
-            bt.logging.warning(f"Miner {hotkey} insufficient dTAO balance (current: {balance}, required: {self.min_dtao_balance}), score is 0")
+            bt.logging.warning(
+                f"Miner {hotkey} insufficient dTAO balance (current: {balance}, required: {self.min_dtao_balance}), score is 0")
             return 0.0
-        
+
+        # 检查授权
         is_authorized = False
-        
         if hotkey in self.authorized_miners:
             is_authorized = True
-        
         elif hotkey in self.miner_history and self.miner_history[hotkey].get("auth_success", False):
             is_authorized = True
-        
         elif hotkey in self._special_aware_miners:
             is_authorized = True
             bt.logging.info(f"Miner {hotkey} authorized due to special test identification")
-        
+
         if not is_authorized:
             bt.logging.warning(f"Miner {hotkey} not authorized, considered cheating, score is 0")
             return 0.0
-        
+
+        # 检查模型使用
         uses_model = self.miner_model_status.get(hotkey)
-        
         if uses_model is not None and uses_model is False:
-            bt.logging.info(f"Miner {hotkey} not running real model, score is 0.5")
-            return 0.5
-            
-        base_score = 0.8 if is_correct else 0.4
-        
+            bt.logging.info(f"Miner {hotkey} not running real model, score is 0.2")
+            return 0.2
+
+        # 基于正确性的基础分数
+        base_score = 0.7 if is_correct else 0.3
+
+        # 历史准确率加成
+        if hotkey in self.miner_history and self.miner_history[hotkey]["total_tests"] >= 10:
+            accuracy = self.miner_history[hotkey]["correct_tests"] / self.miner_history[hotkey]["total_tests"]
+            # 历史准确率超过80%时，奖励0.05分
+            if accuracy >= 0.8:
+                base_score += 0.05
+                bt.logging.debug(f"Miner {hotkey} has high historical accuracy: {accuracy:.2f}, +0.05 score")
+
+        # 概率影响分数
         if synapse.probability is not None:
             probability_score = synapse.probability if is_correct else (1 - synapse.probability)
-            base_score += probability_score * 0.1
-        
+            # 概率的影响更大（概率偏离0.5越远，得分调整越大）
+            base_score += (probability_score - 0.5) * 0.4
+            bt.logging.debug(f"Probability adjustment: {(probability_score - 0.5) * 0.4:.3f}")
+
+        # 响应时间影响分数
         if synapse.response_time is not None:
             MAX_RESPONSE_TIME = 5.0
-            time_factor = max(0.7, 1.0 - (synapse.response_time / MAX_RESPONSE_TIME))
-            base_score *= time_factor
+            time_factor = max(0.0, 1.0 - (synapse.response_time / MAX_RESPONSE_TIME))
+            # 响应时间权重：70%基础分 + 30%时间因子
+            time_adjustment = (0.7 + 0.3 * time_factor) - 1.0  # 计算实际调整量
+            base_score *= (0.7 + 0.3 * time_factor)
+            bt.logging.debug(f"Response time: {synapse.response_time:.2f}s, factor: {time_factor:.2f}, adjustment: {time_adjustment:.3f}")
+
+        # 置信度影响分数
+        if hasattr(synapse, 'confidence_level') and synapse.confidence_level is not None:
+            if str(synapse.confidence_level).lower() in ["high", "strong", "certain"]:
+                base_score += 0.05
+                bt.logging.debug(f"High confidence boost: +0.05")
+            elif str(synapse.confidence_level).lower() in ["low", "weak", "uncertain"]:
+                base_score -= 0.05
+                bt.logging.debug(f"Low confidence penalty: -0.05")
+
+        # 难度系数加成
+        if self.last_test_sample and self.last_test_sample in self.test_database:
+            difficulty = self.test_database[self.last_test_sample].get("difficulty", "")
+            if difficulty == "hard" and is_correct:
+                base_score += 0.05
+                bt.logging.debug(f"Hard test bonus: +0.05")
+
+        # 最终分数区间限制在0.0~1.0
+        final_score = max(0.0, min(1.0, base_score))
         
-        final_score = max(0.5, min(1.0, base_score))
-        
-        bt.logging.info(f"Miner {hotkey} running model correctly, score is {final_score}")
+        bt.logging.info(f"Miner {hotkey} final score: {final_score:.4f} (base: {base_score:.4f})")
         return final_score
 
     async def create_synapse(self) -> CatSoundProtocol:
@@ -488,8 +525,8 @@ class Validator(BaseValidatorNeuron):
 
                 state_path = os.path.join(data_dir, "validator_state.json")
                 minimal_state = {
-                    "miner_history": {}, 
-                    "miner_model_status": {}, 
+                    "miner_history": {},
+                    "miner_model_status": {},
                     "test_round": 0,
                     "special_aware_miners": [],
                     "miner_dtao_balance": {},
@@ -548,15 +585,15 @@ def get_config():
 
 if __name__ == "__main__":
     import argparse
-    
+
     config = get_config()
     config.neuron.full_path = os.path.expanduser(
         os.path.dirname(os.path.abspath(__file__))
     )
-    
+
     bt.logging.info("Initializing validator node...")
     validator = Validator(config=config)
-    
+
     while True:
         bt.logging.info("Validator running ... Press CTRL+C to stop")
         time.sleep(60)
