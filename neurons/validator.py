@@ -312,7 +312,7 @@ def get_config():
     bt.subtensor.add_args(parser)
     bt.logging.add_args(parser)
     bt.wallet.add_args(parser)
-    parser.add_argument("--netuid", type=int, default=1, help="Subnet ID")
+    parser.add_argument("--netuid", type=int, default=86, help="Subnet ID")
     parser.add_argument("--neuron.validation_interval", type=int, default=5, help="Seconds")
     parser.add_argument("--neuron.sample_size", type=int, default=10, help="Samples/round")
     return bt.config(parser)
