@@ -29,20 +29,20 @@ class Validator(BaseValidatorNeuron):
         if config is None:
             config = get_config()
             
-        super(Validator, self).__init__(config=config)
-
-        # Score table: uid -> score
-        self.scores = {}
-        # Miner state tracking
-        self.miner_history = {}  # {uid: [{'timestamp':, 'correct':, 'special':}]}
-        self.miner_model_status = {}  # {uid: bool} - whether running a real model
-        # Minimum dTAO balance requirement
+        # Initialize tracking variables before super().__init__
+        self.miner_history = {}
+        self.miner_model_status = {}
         self.min_dtao_balance = 50.0
-        # Special marker to detect if miners are running real models
         self._special_mark = "MIAO_SPECIAL_MARK_2025"
-        self._special_aware_miners = set()  # miners that recognize the special marker
-        # Last time weights were set
+        self._special_aware_miners = set()
         self.last_weight_set_time = 0
+        self._state = {"round": 0}
+        
+        # Important: Initialize scores as numpy array for compatibility
+        self.scores = torch.zeros(256, dtype=torch.float32)
+        
+        # Initialize base class
+        super(Validator, self).__init__(config=config)
         
         # Test samples database
         self.test_database = [
@@ -54,7 +54,6 @@ class Validator(BaseValidatorNeuron):
             ("not_cat_hard", False),
         ]
         
-        self._state = {"round": 0}
         self.load_state()
         bt.logging.info("Validator initialization complete")
 
@@ -207,14 +206,16 @@ class Validator(BaseValidatorNeuron):
                         # Get balance
                         balance = float(self.metagraph.S[uid]) * 1000
                         
-                        # Calculate score
+                        # Calculate score and update tensor directly
                         score = self.calculate_score(uid, is_correct, uses_model, balance)
-                        self.scores[str(uid)] = float(score)
+                        if uid < len(self.scores):
+                            self.scores[uid] = float(score)
                         
                         bt.logging.info(f"UID={uid} result: correct={is_correct}, model={uses_model}, score={score}")
                     else:
                         bt.logging.warning(f"UID={uid} missing prediction or ground truth")
-                        self.scores[str(uid)] = 0.0
+                        if uid < len(self.scores):
+                            self.scores[uid] = 0.0
                 
                 except ValueError:
                     bt.logging.warning(f"Hotkey={hotkey} not found in metagraph")
@@ -260,9 +261,10 @@ class Validator(BaseValidatorNeuron):
             should_set_weights = (current_time - self.last_weight_set_time) > 1800
             
             if should_set_weights or self._state.get("round", 0) % 10 == 0:
-                # Set weights
-                self.set_weights_direct()
+                # Use standard weights API of BaseValidatorNeuron
+                self.set_weights()
                 self.save_state()
+                self.last_weight_set_time = time.time()
                 
             # Query miners
             await self.query_miners()
@@ -382,24 +384,38 @@ class Validator(BaseValidatorNeuron):
                 
                 # Calculate score
                 score = self.calculate_score(uid, is_correct, uses_model, balance)
-                self.scores[str(uid)] = score
+                
+                # Update score in tensor directly
+                if uid < len(self.scores):
+                    self.scores[uid] = float(score)
                 
                 bt.logging.info(f"UID={uid} query result: correct={is_correct}, model={uses_model}, score={score}")
             else:
                 bt.logging.warning(f"UID={uid} invalid response format")
-                self.scores[str(uid)] = 0.0
+                if uid < len(self.scores):
+                    self.scores[uid] = 0.0
             
         except asyncio.TimeoutError:
             bt.logging.warning(f"UID={uid} query timeout")
-            self.scores[str(uid)] = 0.0
+            if uid < len(self.scores):
+                self.scores[uid] = 0.0
         except Exception as e:
             bt.logging.error(f"UID={uid} query error: {e}")
-            self.scores[str(uid)] = 0.0
+            if uid < len(self.scores):
+                self.scores[uid] = 0.0
 
-    def set_weights_direct(self):
-        """Set weights directly to chain without standard normalization"""
+    def set_weights(self):
+        """Override BaseValidatorNeuron's set_weights to ensure compatibility"""
         try:
             n = self.metagraph.n
+            
+            # Resize scores tensor if needed
+            if len(self.scores) != n:
+                new_scores = torch.zeros(n, dtype=torch.float32)
+                # Copy existing scores
+                for i in range(min(len(self.scores), n)):
+                    new_scores[i] = self.scores[i]
+                self.scores = new_scores
             
             # Convert active to tensor if needed
             active = self.metagraph.active
@@ -408,53 +424,35 @@ class Validator(BaseValidatorNeuron):
             else:
                 active = active.to(torch.bool)
                 
-            w = torch.zeros(n, dtype=torch.float32)
-
-            # Set weights directly from scores
-            bt.logging.info("Setting direct weights (no normalization):")
-            
             # Ensure all inactive miners get 0 weight
             inactive_mask = ~active
-            w[inactive_mask] = 0.0
+            self.scores[inactive_mask] = 0.0
             
-            # Set active miner weights
-            for uid_str, score in self.scores.items():
-                try:
-                    uid = int(uid_str)
-                    if 0 <= uid < n and active[uid]:
-                        w[uid] = float(score)
-                except (ValueError, TypeError):
-                    continue
-                    
             # Print weight statistics
-            zeros = torch.sum(w == 0).item()
-            ones = torch.sum(w == 1.0).item()
+            zeros = torch.sum(self.scores == 0).item()
+            ones = torch.sum(self.scores == 1.0).item()
             bt.logging.info(f"Weight stats: zeros={zeros}, ones={ones}, active={active.sum().item()}")
             
-            # Print sample weights
-            active_indices = torch.nonzero(active).flatten().tolist()
-            if active_indices:
-                samples = random.sample(active_indices, min(5, len(active_indices)))
-                for uid in samples:
-                    bt.logging.info(f"Sample weight UID={uid}: {w[uid].item()}")
-                    
             # If all weights are 0, randomly set one to 1
-            if w.sum().item() == 0 and len(active_indices) > 0:
-                random_uid = random.choice(active_indices)
-                w[random_uid] = 1.0
-                bt.logging.info(f"All weights are 0, randomly setting UID={random_uid} to 1.0")
+            if self.scores.sum().item() == 0:
+                active_indices = torch.nonzero(active).flatten().tolist()
+                if active_indices:
+                    random_uid = random.choice(active_indices)
+                    self.scores[random_uid] = 1.0
+                    bt.logging.info(f"All weights are 0, randomly setting UID={random_uid} to 1.0")
                 
             # Set weights to chain
-            bt.logging.info(f"Setting weights to chain, sum={w.sum().item()}")
+            bt.logging.info(f"Setting weights to chain, sum={self.scores.sum().item()}")
             
             # Create proper uids tensor
             uids = torch.arange(0, n, dtype=torch.long)
             
+            # Note: w are already properly computed in self.scores
             result = self.subtensor.set_weights(
                 netuid=self.config.netuid,
                 wallet=self.wallet,
                 uids=uids,
-                weights=w,
+                weights=self.scores,
                 wait_for_inclusion=False
             )
             
@@ -465,15 +463,21 @@ class Validator(BaseValidatorNeuron):
                 bt.logging.error(f"Weight setting failed")
                 
         except Exception as e:
-            bt.logging.error(f"set_weights_direct error: {e}")
+            bt.logging.error(f"set_weights error: {e}")
             # Update timestamp even on error to prevent rapid retries
             self.last_weight_set_time = time.time()
 
     def save_state(self):
         """Save state to file"""
         try:
+            # Convert tensor to list for saving
+            scores_dict = {}
+            for i in range(len(self.scores)):
+                if self.scores[i] > 0:  # Only save non-zero scores to save space
+                    scores_dict[str(i)] = float(self.scores[i])
+            
             state = {
-                "scores": self.scores,
+                "scores": scores_dict,
                 "miner_history": self.miner_history,
                 "miner_model_status": self.miner_model_status,
                 "special_aware_miners": list(self._special_aware_miners),
@@ -496,8 +500,17 @@ class Validator(BaseValidatorNeuron):
                 with open(path, "r") as f:
                     import json
                     state = json.load(f)
-                    
-                self.scores = state.get("scores", {})
+                
+                # Load scores back into tensor
+                scores_dict = state.get("scores", {})
+                for uid_str, score in scores_dict.items():
+                    try:
+                        uid = int(uid_str)
+                        if uid < len(self.scores):
+                            self.scores[uid] = float(score)
+                    except (ValueError, IndexError):
+                        continue
+                
                 self.miner_history = state.get("miner_history", {})
                 self.miner_model_status = state.get("miner_model_status", {})
                 self._special_aware_miners = set(state.get("special_aware_miners", []))
