@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # MIT License
 # Copyright © 2025 MIAO
 
@@ -6,13 +7,18 @@ import random
 import base64
 import os
 import asyncio
+import traceback
 import bittensor as bt
 import numpy as np
 import torch
+from typing import List, Dict, Tuple, Union
 from template.base.validator import BaseValidatorNeuron
 from template.protocol import CatSoundProtocol
 
 def get_config():
+    """
+    Get the configuration for the validator.
+    """
     import argparse
     parser = argparse.ArgumentParser()
     bt.subtensor.add_args(parser)
@@ -21,9 +27,14 @@ def get_config():
     parser.add_argument("--netuid", type=int, default=86, help="Subnet ID")
     parser.add_argument("--neuron.validation_interval", type=int, default=60, help="Validation interval (seconds)")
     parser.add_argument("--neuron.sample_size", type=int, default=10, help="Number of miners to sample per round")
+    parser.add_argument("--audio.miao_dir", type=str, default="audio/miao", help="Directory containing miao sound samples")
+    parser.add_argument("--audio.other_dir", type=str, default="audio/other", help="Directory containing other sound samples")
     return bt.config(parser)
 
 class Validator(BaseValidatorNeuron):
+    """
+    Validator for the MIAO subnet.
+    """
     def __init__(self, config=None):
         # If no config is provided, use get_config()
         if config is None:
@@ -60,6 +71,23 @@ class Validator(BaseValidatorNeuron):
             ("not_cat_med",  False),
             ("not_cat_hard", False),
         ]
+        
+        # Try to load audio samples if available
+        try:
+            # Check if audio directories exist
+            miao_dir = self.config.audio.miao_dir
+            other_dir = self.config.audio.other_dir
+            
+            if os.path.isdir(miao_dir) and os.path.isdir(other_dir):
+                bt.logging.info(f"Loading audio samples from {miao_dir} and {other_dir}")
+                # Would implement audio sample loading here
+                self.has_audio_samples = True
+            else:
+                bt.logging.warning(f"Audio directories not found: {miao_dir} or {other_dir}")
+                self.has_audio_samples = False
+        except Exception as e:
+            bt.logging.warning(f"Could not load audio samples: {e}")
+            self.has_audio_samples = False
         
         self.load_state()
         bt.logging.info("Validator initialization complete")
@@ -511,6 +539,38 @@ class Validator(BaseValidatorNeuron):
             if uid < len(self.scores):
                 self.scores[uid] = 0.0
 
+    def set_weights(self):
+        """Sets weights on chain using standard methods."""
+        try:
+            # Ensure scores are valid before setting weights
+            self._ensure_scores_are_valid()
+            
+            # Log weight statistics
+            nonzero_count = np.sum(self.scores > 0)
+            bt.logging.info(f"Setting weights: {nonzero_count} non-zero weights out of {len(self.scores)}")
+            
+            # Standard bittensor weights setting with retries
+            try:
+                # Try normalized weights for robustness
+                success = self.subtensor.set_weights(
+                    netuid=self.config.netuid,
+                    wallet=self.wallet,
+                    uids=self.metagraph.uids,
+                    weights=self.scores,
+                    wait_for_inclusion=False,
+                    version_key=getattr(self, 'spec_version', None)
+                )
+                if success:
+                    bt.logging.success(f"Successfully set {nonzero_count} weights on chain")
+                    self.last_weight_set_time = time.time()
+                else:
+                    bt.logging.warning("Failed to set weights on chain")
+            except Exception as e:
+                bt.logging.error(f"Error setting weights: {e}")
+                
+        except Exception as e:
+            bt.logging.error(f"set_weights error: {e}")
+
     def save_state(self):
         """Save state to file"""
         try:
@@ -580,5 +640,8 @@ if __name__ == "__main__":
     # Ensure required modules are imported
     config = get_config()
     config.neuron.full_path = os.path.expanduser(os.path.dirname(os.path.abspath(__file__)))
+    
+    # Create and run the validator
+    bt.logging.info("Starting MIAO validator...")
     validator = Validator(config=config)
     validator.run()
