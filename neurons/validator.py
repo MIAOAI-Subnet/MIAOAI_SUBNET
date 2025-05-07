@@ -30,6 +30,7 @@ class Validator(BaseValidatorNeuron):
             config.neuron.validation_interval = 5
             config.neuron.sample_size = 2
 
+        # Initialize tracking variables
         self.miner_history = {}
         self.miner_model_status = {}
         self.test_round = 0
@@ -39,14 +40,14 @@ class Validator(BaseValidatorNeuron):
         self.min_dtao_balance = 50.0
         self.miner_dtao_balance = {}
         self.last_balance_check = {}
-        # Initialize scores as a dict
-        self.scores = {}
-        
+        self.scores_dict = {}  # Dictionary format for scores
+
         super(Validator, self).__init__(config=config)
         bt.logging.info("Loading validator status")
 
         self.test_database = self.initialize_test_database()
         self.load_state()
+        bt.logging.info("Starting validator for MIAOAI subnet with three-tier scoring system")
 
     def initialize_test_database(self):
         return {
@@ -63,7 +64,7 @@ class Validator(BaseValidatorNeuron):
             hotkey = getattr(synapse.dendrite, 'hotkey', None)
             bt.logging.info(f"Validation request from UUID={getattr(synapse.dendrite, 'uuid', 'Unknown')}")
 
-            if random.random() < 0.9:
+            if random.random() < 0.3:  # 30% chance of special test
                 test_id, is_cat = self.select_test_sample()
                 encoded = self._create_special_test(test_id)
             else:
@@ -83,333 +84,348 @@ class Validator(BaseValidatorNeuron):
 
         except Exception as e:
             bt.logging.error(f"Error in forward: {e}")
-            synapse.audio_data = base64.b64encode("ERROR".encode()).decode('utf-8')
-        
+            synapse.audio_data = "ERROR"
+
         return synapse
 
-    def _create_special_test(self, test_id):
-        # Create a special test that contains a hidden marker
-        test_content = f"TEST:{test_id}:{self._special_mark}"
-        return base64.b64encode(test_content.encode()).decode('utf-8')
-
     def select_test_sample(self):
-        # Randomly select a test sample from the database
-        sample_id = random.choice(list(self.test_database.keys()))
-        is_cat = self.test_database[sample_id]["is_cat"]
-        return sample_id, is_cat
+        test_id = random.choice(list(self.test_database.keys()))
+        is_cat = self.test_database[test_id]["is_cat"]
+        return test_id, is_cat
+
+    def _create_special_test(self, test_id):
+        # Add special marker for testing if miners run real model
+        special_data = f"TEST:{test_id}:{self._special_mark}"
+        return base64.b64encode(special_data.encode()).decode('utf-8')
+
+    def _verify_special_response(self, response, expected_id):
+        if not response or not isinstance(response, str):
+            return False
+        
+        try:
+            # Check if response contains awareness of special marker
+            return self._special_mark in response
+        except:
+            return False
 
     def process_test_results(self, synapse):
         hotkey = getattr(synapse.dendrite, 'hotkey', None)
-        if hotkey is None:
-            bt.logging.warning(f"Cannot identify miner: dendrite hotkey is None")
+        if not hotkey:
+            bt.logging.warning("No hotkey found in synapse")
             return
-        
+            
+        uid = None
         try:
             uid = self.metagraph.hotkeys.index(hotkey)
-            bt.logging.info(f"Processing results from UID={uid}, Hotkey={hotkey[:10]}...")
+        except ValueError:
+            bt.logging.warning(f"Hotkey {hotkey} not found in metagraph")
+            return
+
+        bt.logging.info(f"Processing results from UID={uid}")
+        
+        # Process response based on test type
+        if synapse.sample_id:
+            expected_result = synapse.ground_truth
             
-            # Check for special mark in response
-            is_using_model = self.detect_model_usage(synapse)
-            if hotkey not in self.miner_model_status:
-                self.miner_model_status[hotkey] = {
-                    'running_model': is_using_model,
-                    'last_update': time.time()
-                }
+            # Check if this was a special test
+            is_special_test = False
+            if hasattr(synapse, 'response') and synapse.response:
+                if hasattr(synapse.response, 'hidden_marker_response'):
+                    hidden_response = synapse.response.hidden_marker_response
+                    if hidden_response:
+                        is_special_test = self._verify_special_response(hidden_response, synapse.sample_id)
+                        if is_special_test:
+                            bt.logging.info(f"Miner {uid} passed special test")
+                            if uid is not None:
+                                self._special_aware_miners.add(uid)
+            
+            # Record prediction accuracy
+            if hasattr(synapse, 'response') and synapse.response:
+                if hasattr(synapse.response, 'predictions') and synapse.response.predictions:
+                    pred = synapse.response.predictions[0] if isinstance(synapse.response.predictions, list) and len(synapse.response.predictions) > 0 else None
+                    if pred and isinstance(pred, dict) and 'is_cat' in pred:
+                        result = pred['is_cat'] == expected_result
+                        
+                        # Track miner response history
+                        if uid not in self.miner_history:
+                            self.miner_history[uid] = []
+                        
+                        self.miner_history[uid].append({
+                            'timestamp': time.time(),
+                            'result': result,
+                            'is_special_test': is_special_test
+                        })
+                        
+                        # Check if the miner is using a real model
+                        model_usage = self.detect_model_usage(uid)
+                        self.miner_model_status[uid] = model_usage
+                        
+                        # Check dTAO balance periodically (every 300 seconds)
+                        current_time = time.time()
+                        if uid not in self.last_balance_check or (current_time - self.last_balance_check.get(uid, 0)) > 300:
+                            balance = self.check_dtao_balance(hotkey)
+                            self.miner_dtao_balance[uid] = balance
+                            self.last_balance_check[uid] = current_time
+                            bt.logging.info(f"Updated dTAO balance for UID={uid}: {balance}")
+                            
+                        # Calculate score
+                        score = self.calculate_score(uid, result)
+                        self.scores_dict[uid] = float(score)  # Store score in dictionary format
+                        
+                        bt.logging.info(f"Score for UID={uid}: {score}")
+                        
             else:
-                # Update model status with a bit of hysteresis
-                if is_using_model != self.miner_model_status[hotkey]['running_model']:
-                    # Confirm change only after multiple consistent observations
-                    if not hasattr(self, 'model_status_changes'):
-                        self.model_status_changes = {}
+                bt.logging.warning(f"No response from miner {uid}")
+
+    def detect_model_usage(self, uid):
+        # Check if miner is aware of special tests
+        if uid in self._special_aware_miners:
+            return True
+            
+        # Check recent history
+        if uid in self.miner_history:
+            history = self.miner_history[uid]
+            
+            # Only consider miners with sufficient history
+            if len(history) >= 5:
+                # Check if miner has consistent performance
+                results = [entry['result'] for entry in history[-10:]]
+                if sum(results) / len(results) > 0.7:
+                    # Miners with consistently good performance likely run real models
+                    return True
+                
+                # Check if there's variance in success rate
+                if 0.3 < sum(results) / len(results) < 0.9:
+                    # Some variance indicates real model behavior
+                    return True
                     
-                    if hotkey not in self.model_status_changes:
-                        self.model_status_changes[hotkey] = {'count': 1, 'status': is_using_model}
-                    elif self.model_status_changes[hotkey]['status'] == is_using_model:
-                        self.model_status_changes[hotkey]['count'] += 1
+                # Check for patterns that indicate artificial responses
+                consecutive_same = 1
+                max_consecutive = 1
+                for i in range(1, len(results)):
+                    if results[i] == results[i-1]:
+                        consecutive_same += 1
+                        max_consecutive = max(max_consecutive, consecutive_same)
                     else:
-                        self.model_status_changes[hotkey] = {'count': 1, 'status': is_using_model}
+                        consecutive_same = 1
+                
+                # Long streaks of identical results suggest fake responses
+                if max_consecutive > 7:
+                    return False
                     
-                    # Update status after sufficient evidence
-                    if self.model_status_changes[hotkey]['count'] >= 3:
-                        self.miner_model_status[hotkey]['running_model'] = is_using_model
-                        self.miner_model_status[hotkey]['last_update'] = time.time()
-                        bt.logging.info(f"Updated model status for UID={uid}: running_model={is_using_model}")
-                        del self.model_status_changes[hotkey]
-                
-            # Check dTAO balance periodically (once every 300 seconds / 5 minutes)
-            current_time = time.time()
-            if hotkey not in self.last_balance_check or current_time - self.last_balance_check[hotkey] > 300:
-                self.check_dtao_balance(uid, hotkey)
-                self.last_balance_check[hotkey] = current_time
-            
-            # Record test result if response matches requested sample
-            prev_sample_id = getattr(synapse, 'sample_id', None)
-            prev_ground_truth = getattr(synapse, 'ground_truth', None)
-            result = getattr(synapse, 'is_cat', None)
-            
-            if prev_sample_id and prev_ground_truth is not None and result is not None:
-                if hotkey not in self.miner_history:
-                    self.miner_history[hotkey] = []
-                
-                self.miner_history[hotkey].append({
-                    'timestamp': time.time(),
-                    'sample_id': prev_sample_id,
-                    'ground_truth': prev_ground_truth,
-                    'result': result,
-                    'correct': result == prev_ground_truth,
-                    'using_model': self.miner_model_status[hotkey]['running_model']
-                })
-                
-                # Keep history limited to last 100 results
-                if len(self.miner_history[hotkey]) > 100:
-                    self.miner_history[hotkey].pop(0)
-                
-                # Calculate score and set weights
-                self.calculate_score(hotkey, uid)
-            
-        except ValueError as e:
-            bt.logging.warning(f"Miner hotkey {hotkey[:10]}... not found in metagraph: {e}")
-        except Exception as e:
-            bt.logging.error(f"Error processing results: {e}")
-    
-    def check_dtao_balance(self, uid, hotkey):
+        # Default to assuming model is NOT running
+        return False
+
+    def check_dtao_balance(self, hotkey):
         try:
-            # Actual implementation would query the appropriate API to get dTAO balance
-            # This is a simplified placeholder
-            dtao_balance = random.uniform(30, 100) # Replace with actual API call
-            self.miner_dtao_balance[hotkey] = dtao_balance
-            if dtao_balance < self.min_dtao_balance:
-                bt.logging.warning(f"UID={uid} has insufficient dTAO balance: {dtao_balance} < {self.min_dtao_balance}")
-            else:
-                bt.logging.info(f"UID={uid} dTAO balance: {dtao_balance}")
-            return dtao_balance
+            # Get the actual dTAO balance from the blockchain
+            subtensor = bt.subtensor()
+            balance = subtensor.get_balance(hotkey)
+            bt.logging.info(f"Checked real dTAO balance for {hotkey}: {balance}")
+            return float(balance)
         except Exception as e:
             bt.logging.error(f"Error checking dTAO balance: {e}")
-            return 0
-    
-    def detect_model_usage(self, synapse):
-        # Detect if the miner is actually running a model
-        # Special tests help identify cheating miners
-        hotkey = getattr(synapse.dendrite, 'hotkey', None)
-        if hotkey is None:
-            return False
+            return 0.0
+
+    def calculate_score(self, uid, result):
+        # Three-tier scoring system
+        # 0.0 - Cheating or insufficient dTAO balance
+        # 0.5 - Installed but not running a model
+        # 1.0 - Running a model, adjusted by performance
         
-        # Check for hidden marker in responses
-        hidden_marker_response = getattr(synapse, 'hidden_marker', None)
-        if hidden_marker_response == self._special_mark:
-            bt.logging.info(f"Miner recognized special test")
-            self._special_aware_miners.add(hotkey)
-            return True
-        
-        # Analyze pattern of responses
-        if hotkey in self.miner_history and len(self.miner_history[hotkey]) > 10:
-            # Count how many tests were answered correctly
-            recent_tests = self.miner_history[hotkey][-10:]
-            correct_count = sum(1 for test in recent_tests if test['correct'])
-            accuracy = correct_count / len(recent_tests)
+        # Check if miner has no history (new miner)
+        if uid not in self.miner_history or len(self.miner_history[uid]) < 3:
+            bt.logging.info(f"UID={uid} has insufficient history, setting score to 0.0")
+            return 0.0
             
-            # If accuracy is too perfect, suspicious
-            if accuracy > 0.95:
-                consistent_answers = len(set(test['result'] for test in recent_tests)) == 1
-                if consistent_answers:
-                    bt.logging.warning(f"Suspicious pattern: Perfect accuracy with same answer every time")
-                    return False
+        # Check dTAO balance requirement
+        if uid in self.miner_dtao_balance and self.miner_dtao_balance[uid] < self.min_dtao_balance:
+            bt.logging.info(f"UID={uid} has insufficient dTAO balance ({self.miner_dtao_balance[uid]} < {self.min_dtao_balance})")
+            return 0.0
             
-            # More sophisticated patterns would be checked here
-            # For now, a simple rule based on accuracy
-            return accuracy > 0.5  # Reasonable model should get at least 50% accuracy
-        
-        return True  # Default to assuming model is running until proven otherwise
-    
-    def calculate_score(self, hotkey, uid):
-        """
-        Three-level scoring system:
-        - Level 0 (0.0): Cheating miners or those with insufficient dTAO balance
-        - Level 1 (0.5): Miners who are installed but not running the model
-        - Level 2 (1.0): Miners who are running the model, score adjusted based on performance
-        """
-        # Check dTAO balance first
-        if hotkey in self.miner_dtao_balance and self.miner_dtao_balance[hotkey] < self.min_dtao_balance:
-            bt.logging.info(f"UID={uid} has insufficient dTAO balance. Score set to 0.0")
-            # Ensure scores is a dictionary
-            if isinstance(self.scores, np.ndarray):
-                self.scores = {uid: 0.0 for uid in range(len(self.scores))}
-            self.scores[uid] = 0.0
-            return
-        
-        # Check if miner is running a model
-        is_running_model = False
-        if hotkey in self.miner_model_status:
-            is_running_model = self.miner_model_status[hotkey]['running_model']
+        # Check if miner is running a real model
+        is_running_model = self.miner_model_status.get(uid, False)
         
         if not is_running_model:
-            bt.logging.info(f"UID={uid} is not running a model. Score set to 0.5")
-            # Ensure scores is a dictionary
-            if isinstance(self.scores, np.ndarray):
-                self.scores = {uid: 0.0 for uid in range(len(self.scores))}
-            self.scores[uid] = 0.5
-            return
+            bt.logging.info(f"UID={uid} is not running a real model, setting score to 0.5")
+            return 0.5
+            
+        # For miners running a model, adjust score based on performance
+        recent_results = [entry['result'] for entry in self.miner_history[uid][-10:]]
+        accuracy = sum(recent_results) / len(recent_results)
         
-        # If running model, evaluate performance
-        if hotkey in self.miner_history and len(self.miner_history[hotkey]) > 0:
-            # Consider only the last 20 results or all if fewer
-            recent_history = self.miner_history[hotkey][-20:]
-            correct_count = sum(1 for test in recent_history if test['correct'])
-            accuracy = correct_count / len(recent_history)
-            
-            # Base score for running model is 1.0, adjusted by accuracy
-            base_score = 1.0
-            performance_adjustment = (accuracy - 0.5) * 0.4  # Scales from -0.2 to +0.2
-            final_score = max(0.5, min(1.0, base_score + performance_adjustment))
-            
-            bt.logging.info(f"UID={uid} is running model with accuracy {accuracy:.2f}. Score set to {final_score:.2f}")
-            # Ensure scores is a dictionary
-            if isinstance(self.scores, np.ndarray):
-                self.scores = {uid: 0.0 for uid in range(len(self.scores))}
-            self.scores[uid] = final_score
-        else:
-            # Not enough history, give base score for running model
-            bt.logging.info(f"UID={uid} is running model but has insufficient history. Score set to 1.0")
-            # Ensure scores is a dictionary
-            if isinstance(self.scores, np.ndarray):
-                self.scores = {uid: 0.0 for uid in range(len(self.scores))}
-            self.scores[uid] = 1.0
-    
+        # Performance adjustment: 0.8 to 1.0 based on accuracy
+        performance_score = 0.8 + 0.2 * accuracy
+        
+        bt.logging.info(f"UID={uid} is running a real model with accuracy {accuracy}, setting score to {performance_score}")
+        return float(performance_score)
+
     def save_state(self):
-        """Save the neuron state to a file."""
-        state = {
-            "miner_history": self.miner_history,
-            "miner_model_status": self.miner_model_status,
-            "test_round": self.test_round,
-            "special_aware_miners": list(self._special_aware_miners),
-            "miner_dtao_balance": self.miner_dtao_balance,
-            "last_balance_check": self.last_balance_check
-        }
-        
-        # Convert scores from numpy array to dict if needed
-        if isinstance(self.scores, np.ndarray):
-            state["scores"] = {str(i): float(score) for i, score in enumerate(self.scores)}
-        else:
-            # Ensure all values are serializable
-            state["scores"] = {str(k): float(v) for k, v in self.scores.items()}
-            
         try:
-            with open("validator_state.json", "w") as f:
+            state = {
+                'miner_history': self.miner_history,
+                'miner_model_status': self.miner_model_status,
+                'special_aware_miners': list(self._special_aware_miners),
+                'miner_dtao_balance': self.miner_dtao_balance,
+                'last_balance_check': self.last_balance_check,
+                'scores': self.scores_dict,  # Save scores as dictionary
+                'test_round': self.test_round
+            }
+            
+            with open('validator_state.json', 'w') as f:
                 json.dump(state, f)
+                
             bt.logging.info("Validator state saved successfully")
         except Exception as e:
-            bt.logging.error(f"Failed to save validator state: {e}")
-    
+            bt.logging.error(f"Error saving validator state: {e}")
+
     def load_state(self):
-        """Load the neuron state from a file if it exists."""
         try:
-            if os.path.exists("validator_state.json"):
-                with open("validator_state.json", "r") as f:
+            if os.path.exists('validator_state.json'):
+                with open('validator_state.json', 'r') as f:
                     state = json.load(f)
+                    
+                self.miner_history = state.get('miner_history', {})
+                self.miner_model_status = state.get('miner_model_status', {})
+                self._special_aware_miners = set(state.get('special_aware_miners', []))
+                self.miner_dtao_balance = state.get('miner_dtao_balance', {})
+                self.last_balance_check = state.get('last_balance_check', {})
+                self.scores_dict = state.get('scores', {})  # Load scores as dictionary
+                self.test_round = state.get('test_round', 0)
                 
-                self.miner_history = state.get("miner_history", {})
-                self.miner_model_status = state.get("miner_model_status", {})
-                self.test_round = state.get("test_round", 0)
-                self._special_aware_miners = set(state.get("special_aware_miners", []))
-                self.miner_dtao_balance = state.get("miner_dtao_balance", {})
-                self.last_balance_check = state.get("last_balance_check", {})
-                
-                # Load scores as dictionary
-                scores_dict = state.get("scores", {})
-                for k, v in scores_dict.items():
-                    try:
-                        uid = int(k)
-                        self.scores[uid] = float(v)
-                    except (ValueError, TypeError):
-                        continue
-                        
                 bt.logging.info("Validator state loaded successfully")
         except Exception as e:
-            bt.logging.error(f"Failed to load validator state: {e}")
-    
-    def set_weights(self):
-        """Set weights based on the three-tier scoring system."""
-        try:
-            # Ensure we have a populated metagraph
-            if not self.metagraph or self.metagraph.n.item() == 0:
-                bt.logging.warning("Metagraph not populated yet, skipping set_weights")
-                return
+            bt.logging.error(f"Error loading validator state: {e}")
 
-            # Initialize weights as a tensor of zeros
-            weights = torch.zeros(self.metagraph.n)
+    def set_weights(self):
+        try:
+            # Convert scores dictionary to numpy array aligned with UIDs
+            scores = torch.zeros(self.metagraph.n)
             
-            # Check if scores is a numpy array and convert to dictionary if needed
-            if isinstance(self.scores, np.ndarray):
-                scores_dict = {i: float(score) for i, score in enumerate(self.scores) if i < len(weights)}
-            else:
-                scores_dict = self.scores
-            
-            # Convert scores dictionary to tensor
-            for uid, score in scores_dict.items():
+            for uid, score in self.scores_dict.items():
                 if isinstance(uid, str):
-                    try:
-                        uid = int(uid)
-                    except ValueError:
-                        continue
-                if uid < len(weights):
-                    # 确保使用Python float，而不是numpy.float32
-                    weights[uid] = float(score)
+                    uid = int(uid)
+                if uid < self.metagraph.n:
+                    scores[uid] = float(score)
             
-            # Normalize the weights
-            if torch.sum(weights) > 0:
-                weights = weights / torch.sum(weights)
+            bt.logging.info(f"Setting weights for {len(self.scores_dict)} miners")
             
-            # Log the weights we are setting
-            bt.logging.info(f"Setting weights: {weights}")
+            # Normalize weights
+            scores = torch.nn.functional.normalize(scores, p=1, dim=0)
             
-            # Set the weights on the Bittensor network
-            self.subtensor.set_weights(
+            # Set weights on the blockchain
+            result = self.subtensor.set_weights(
                 netuid=self.config.netuid,
                 wallet=self.wallet,
-                uids=torch.arange(0, len(weights)),
-                weights=weights,
+                uids=torch.arange(0, self.metagraph.n),
+                weights=scores,
                 wait_for_inclusion=False
             )
             
-            # Store scores for future reference
-            # Important: Store as dictionary to avoid numpy array issues
-            self.scores = {uid: float(weights[uid].item()) for uid in range(len(weights))}
-            
-            bt.logging.info("Weights set successfully with three-tier scoring system")
+            if result:
+                bt.logging.info("Successfully set weights")
+            else:
+                bt.logging.error("Failed to set weights")
+                
         except Exception as e:
-            bt.logging.error(f"Error setting weights: {e}")
-    
-    async def run_async(self):
-        """Run the validator asynchronously."""
-        bt.logging.info("Starting validator for MIAOAI subnet with three-tier scoring system")
-        
-        step = 0
-        while True:
-            try:
-                # Update metagraph and set weights
-                self.metagraph.sync()
-                bt.logging.info(f"Metagraph updated with {self.metagraph.n.item()} total miners")
+            bt.logging.error(f"Error setting weights: {str(e)}")
+
+    async def run_step(self):
+        try:
+            # Resync the metagraph
+            self.metagraph.sync()
+            bt.logging.info(f"Metagraph updated with {self.metagraph.n} total miners")
+            
+            if self.test_round % 10 == 0:
+                # Update weights every 10 rounds
+                self.set_weights()
                 
-                # Set weights and save state periodically
-                if step % 10 == 0:
-                    self.set_weights()
-                    self.save_state()
-                
-                # Wait for the next interval
-                await asyncio.sleep(self.config.neuron.validation_interval)
-                step += 1
-                
-            except KeyboardInterrupt:
-                bt.logging.info("Keyboard interrupt detected, saving state and exiting")
+                # Save state
                 self.save_state()
-                break
+                
+            self.test_round += 1
+            
+            # Query random miners
+            await self.query_miners()
+            
+        except Exception as e:
+            bt.logging.error(f"Error in run_step: {e}")
+
+    async def query_miners(self):
+        # Select sample_size random miners to query
+        uids = random.sample(range(self.metagraph.n), min(self.config.neuron.sample_size, self.metagraph.n))
+        
+        bt.logging.info(f"Querying {len(uids)} random miners")
+        
+        for uid in uids:
+            try:
+                # Get the miner endpoint
+                axon = self.metagraph.axons[uid]
+                
+                # Create the synapse with testing sample
+                test_id, is_cat = self.select_test_sample()
+                
+                if random.random() < 0.3:  # 30% special test probability
+                    encoded = self._create_special_test(test_id)
+                else:
+                    encoded = base64.b64encode(f"TEST:{test_id}".encode()).decode('utf-8')
+                
+                synapse = CatSoundProtocol(
+                    audio_data=encoded,
+                    sample_id=test_id,
+                    ground_truth=is_cat
+                )
+                
+                # Query the miner
+                bt.logging.info(f"Querying UID={uid}")
+                response = await self.dendrite.forward(axon, synapse, deserialize=True)
+                
+                # Process the results
+                if response and hasattr(response, 'predictions'):
+                    bt.logging.info(f"Got response from UID={uid}")
+                    
+                    # Process the response
+                    pred = response.predictions[0] if isinstance(response.predictions, list) and len(response.predictions) > 0 else None
+                    
+                    if pred and isinstance(pred, dict) and 'is_cat' in pred:
+                        result = pred['is_cat'] == is_cat
+                        
+                        # Update miner history
+                        if uid not in self.miner_history:
+                            self.miner_history[uid] = []
+                            
+                        # Check if this was a special test
+                        is_special_test = False
+                        if hasattr(response, 'hidden_marker_response') and response.hidden_marker_response:
+                            is_special_test = self._verify_special_response(response.hidden_marker_response, test_id)
+                            if is_special_test:
+                                bt.logging.info(f"Miner {uid} passed special test")
+                                self._special_aware_miners.add(uid)
+                        
+                        # Record the result
+                        self.miner_history[uid].append({
+                            'timestamp': time.time(),
+                            'result': result,
+                            'is_special_test': is_special_test
+                        })
+                        
+                        # Update model status
+                        model_usage = self.detect_model_usage(uid)
+                        self.miner_model_status[uid] = model_usage
+                        
+                        # Check dTAO balance
+                        hotkey = self.metagraph.hotkeys[uid]
+                        current_time = time.time()
+                        if uid not in self.last_balance_check or (current_time - self.last_balance_check.get(uid, 0)) > 300:
+                            balance = self.check_dtao_balance(hotkey)
+                            self.miner_dtao_balance[uid] = balance
+                            self.last_balance_check[uid] = current_time
+                            
+                        # Calculate score
+                        score = self.calculate_score(uid, result)
+                        self.scores_dict[uid] = float(score)
+                        
+                        bt.logging.info(f"Score for UID={uid}: {score}")
+                
             except Exception as e:
-                bt.logging.error(f"Error in validator loop: {e}")
-                await asyncio.sleep(self.config.neuron.validation_interval)
-
-def main():
-    validator = Validator()
-    asyncio.run(validator.run_async())
-
-if __name__ == "__main__":
-    main()
+                bt.logging.error(f"Error querying miner {uid}: {e}")
