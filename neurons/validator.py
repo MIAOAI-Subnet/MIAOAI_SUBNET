@@ -41,6 +41,16 @@ class Validator(BaseValidatorNeuron):
         # Initialize base class - Important: this will set self.scores as numpy array
         super(Validator, self).__init__(config=config)
         
+        # Ensure dendrite is properly initialized
+        if not hasattr(self, 'dendrite') or self.dendrite is None:
+            bt.logging.warning("Dendrite not initialized in base class, creating manually...")
+            self.dendrite = bt.dendrite(wallet=self.wallet)
+        
+        # Ensure subtensor is properly initialized
+        if not hasattr(self, 'subtensor') or self.subtensor is None:
+            bt.logging.info(f"Initializing subtensor connection to network: {self.config.netuid.network}")
+            self.subtensor = bt.subtensor(network=self.config.netuid.network)
+        
         # Test samples database
         self.test_database = [
             ("cat_easy",     True),
@@ -53,6 +63,18 @@ class Validator(BaseValidatorNeuron):
         
         self.load_state()
         bt.logging.info("Validator initialization complete")
+        
+        # Ensure metagraph is synchronized
+        if not hasattr(self, 'metagraph'):
+            bt.logging.info("Initializing metagraph...")
+            self.metagraph = bt.metagraph(netuid=self.config.netuid, sync=False)
+        
+        bt.logging.info("Starting initial metagraph sync...")
+        try:
+            self.metagraph.sync(subtensor=self.subtensor)
+            bt.logging.info(f"Initial sync completed: total nodes={self.metagraph.n}, current block={self.metagraph.block}")
+        except Exception as e:
+            bt.logging.warning(f"Initial sync failed, will retry during runtime: {e}")
 
     def select_test_sample(self):
         # Randomly select a test sample (ID and ground truth)
@@ -249,38 +271,56 @@ class Validator(BaseValidatorNeuron):
             return synapse
 
     async def run_step(self):
-        """Standard run step for BaseValidatorNeuron"""
+        """Standard run step, ensuring proper metagraph synchronization"""
         try:
-            # Sync metagraph
-            self.metagraph.sync(subtensor=self.subtensor)
-            bt.logging.info(f"Metagraph synced, miners={self.metagraph.n}")
+            # Ensure subtensor is correctly initialized
+            if self.subtensor is None:
+                self.subtensor = bt.subtensor(network=self.config.netuid.network)
+                bt.logging.info(f"Initialized subtensor connection to network: {self.config.netuid.network}")
             
-            # Check if weights should be set (every 30 minutes)
+            # Comprehensive metagraph synchronization
+            bt.logging.info("Starting metagraph synchronization...")
+            try:
+                # Ensure using correct subnet ID
+                self.metagraph.sync(subtensor=self.subtensor)
+                
+                # Get detailed sync status information
+                active_count = torch.sum(self.metagraph.active).item() if isinstance(self.metagraph.active, torch.Tensor) else sum(self.metagraph.active)
+                bt.logging.info(f"Metagraph sync completed: total nodes={self.metagraph.n}, active nodes={active_count}, current block={self.metagraph.block}")
+                
+                # Check if first few axon information is valid
+                if self.metagraph.n > 0:
+                    for i in range(min(3, self.metagraph.n)):
+                        axon = self.metagraph.axons[i]
+                        hotkey = axon.hotkey if hasattr(axon, 'hotkey') and axon.hotkey else 'None'
+                        bt.logging.info(f"Axon example UID={i}: ip={axon.ip}, port={axon.port}, hotkey={hotkey[:10]}...")
+            except Exception as e:
+                bt.logging.error(f"Metagraph sync failed: {e}")
+                # Wait and continue rather than exiting directly if sync fails
+                await asyncio.sleep(10)
+                
+            # Ensure weights are set
             current_time = time.time()
             should_set_weights = (current_time - self.last_weight_set_time) > 1800
             
             if should_set_weights or self._state.get("round", 0) % 10 == 0:
-                # Do not override set_weights, let the parent class handle it
-                # Just ensure scores are properly stored
                 self._ensure_scores_are_valid()
-                
-                # Call parent class set_weights - which will handle normalization and chain interaction
                 self.set_weights()
                 self.save_state()
                 self.last_weight_set_time = time.time()
                 
-            # Query miners
+            # Query miner nodes
             await self.query_miners()
             
             # Update round counter
             self._state["round"] = self._state.get("round", 0) + 1
             
-            # Add longer sleep to avoid rate limits
+            # Wait for next round
             await asyncio.sleep(self.config.neuron.validation_interval)
             
         except Exception as e:
             bt.logging.error(f"Run step error: {e}")
-            # Sleep longer on error to avoid rapid restart loops
+            # Wait longer on error to avoid rapid restarts
             await asyncio.sleep(60)
 
     def _ensure_scores_are_valid(self):
@@ -336,7 +376,7 @@ class Validator(BaseValidatorNeuron):
         num_active = np.sum(active)
         num_scored = np.sum(self.scores > 0.0)
         
-        bt.logging.info(f"Score stats: zeros={num_zeros}, ones={num_ones}, active={num_active}, scored={num_scored}")
+        bt.logging.info(f"Score statistics: zeros={num_zeros}, ones={num_ones}, active nodes={num_active}, scored nodes={num_scored}")
 
     async def query_miners(self):
         """Query a batch of random miners"""
@@ -354,6 +394,10 @@ class Validator(BaseValidatorNeuron):
             else:
                 active = active.to(torch.bool)
                 
+            active_count = torch.sum(active).item()
+            bt.logging.info(f"Metagraph status: total nodes={self.metagraph.n}, active nodes={active_count}")
+            
+            # If no active nodes, log warning and return
             active_indices = torch.nonzero(active).flatten().tolist()
             if not active_indices:
                 bt.logging.warning("No active miners")
@@ -368,6 +412,9 @@ class Validator(BaseValidatorNeuron):
             for uid in selected_uids:
                 synapse = await self.create_synapse()
                 axon = self.metagraph.axons[uid]
+                
+                # Log the miner that will be queried
+                bt.logging.info(f"Preparing to query UID={uid}: ip={axon.ip}, port={axon.port}, hotkey={axon.hotkey[:10] if axon.hotkey else 'None'}...")
                 
                 # Add task with timeout
                 task = asyncio.create_task(
@@ -385,13 +432,15 @@ class Validator(BaseValidatorNeuron):
     async def _query_single_miner(self, uid, axon, synapse):
         """Query a single miner with timeout handling"""
         try:
-            bt.logging.info(f"Querying UID={uid}")
+            bt.logging.info(f"Starting query to UID={uid}, address={axon.ip}:{axon.port}")
             
-            # Set timeout
+            # Use dendrite.forward to send request to miner's axon
             response = await asyncio.wait_for(
                 self.dendrite.forward(axon, synapse, deserialize=True),
                 timeout=10.0
             )
+            
+            bt.logging.info(f"Successfully received response from UID={uid}")
             
             # Process response using CatSoundProtocol fields
             is_cat_pred = getattr(response, 'is_cat_sound', None)
@@ -458,7 +507,7 @@ class Validator(BaseValidatorNeuron):
             if uid < len(self.scores):
                 self.scores[uid] = 0.0
         except Exception as e:
-            bt.logging.error(f"UID={uid} query error: {e}")
+            bt.logging.error(f"UID={uid} query error: {e}, axon={axon}")
             if uid < len(self.scores):
                 self.scores[uid] = 0.0
 
@@ -485,7 +534,7 @@ class Validator(BaseValidatorNeuron):
                 json.dump(state, f, default=str)  # Use default=str for non-serializable objects
             bt.logging.info("State saved successfully")
         except Exception as e:
-            bt.logging.error(f"save_state error: {e}")
+            bt.logging.error(f"Save state error: {e}")
 
     def load_state(self):
         """Load state from file"""
@@ -514,7 +563,7 @@ class Validator(BaseValidatorNeuron):
                 
                 bt.logging.info("State loaded successfully")
         except Exception as e:
-            bt.logging.error(f"load_state error: {e}")
+            bt.logging.error(f"Load state error: {e}")
 
     async def concurrent_forward(self):
         """
