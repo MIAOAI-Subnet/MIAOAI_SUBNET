@@ -38,10 +38,7 @@ class Validator(BaseValidatorNeuron):
         self.last_weight_set_time = 0
         self._state = {"round": 0}
         
-        # Important: Initialize scores as numpy array for compatibility
-        self.scores = torch.zeros(256, dtype=torch.float32)
-        
-        # Initialize base class
+        # Initialize base class - Important: this will set self.scores as numpy array
         super(Validator, self).__init__(config=config)
         
         # Test samples database
@@ -206,8 +203,10 @@ class Validator(BaseValidatorNeuron):
                         # Get balance
                         balance = float(self.metagraph.S[uid]) * 1000
                         
-                        # Calculate score and update tensor directly
+                        # Calculate score and update scores array directly
                         score = self.calculate_score(uid, is_correct, uses_model, balance)
+                        
+                        # Update score in numpy array
                         if uid < len(self.scores):
                             self.scores[uid] = float(score)
                         
@@ -261,7 +260,11 @@ class Validator(BaseValidatorNeuron):
             should_set_weights = (current_time - self.last_weight_set_time) > 1800
             
             if should_set_weights or self._state.get("round", 0) % 10 == 0:
-                # Use standard weights API of BaseValidatorNeuron
+                # Do not override set_weights, let the parent class handle it
+                # Just ensure scores are properly stored
+                self._ensure_scores_are_valid()
+                
+                # Call parent class set_weights - which will handle normalization and chain interaction
                 self.set_weights()
                 self.save_state()
                 self.last_weight_set_time = time.time()
@@ -279,6 +282,61 @@ class Validator(BaseValidatorNeuron):
             bt.logging.error(f"Run step error: {e}")
             # Sleep longer on error to avoid rapid restart loops
             await asyncio.sleep(60)
+
+    def _ensure_scores_are_valid(self):
+        """Ensure scores are in the correct format before setting weights"""
+        n = self.metagraph.n
+        
+        # Ensure scores is a numpy array of the correct shape
+        if not isinstance(self.scores, np.ndarray):
+            bt.logging.warning(f"Converting scores from {type(self.scores)} to numpy array")
+            
+            # If it's a torch tensor, convert to numpy
+            if isinstance(self.scores, torch.Tensor):
+                self.scores = self.scores.cpu().detach().numpy()
+            else:
+                # Create new numpy array
+                new_scores = np.zeros(n, dtype=np.float32)
+                
+                # If it's a dictionary, try to extract values
+                if isinstance(self.scores, dict):
+                    for uid_str, score in self.scores.items():
+                        try:
+                            uid = int(uid_str)
+                            if 0 <= uid < n:
+                                new_scores[uid] = float(score)
+                        except (ValueError, IndexError):
+                            continue
+                self.scores = new_scores
+        
+        # Ensure scores array has the correct shape
+        if len(self.scores) != n:
+            bt.logging.warning(f"Resizing scores from {len(self.scores)} to {n}")
+            new_scores = np.zeros(n, dtype=np.float32)
+            # Copy existing scores
+            for i in range(min(len(self.scores), n)):
+                new_scores[i] = self.scores[i]
+            self.scores = new_scores
+        
+        # Ensure all scores are properly bounded
+        self.scores = np.clip(self.scores, 0.0, 1.0)
+        
+        # Apply inactive mask - ensure all inactive miners have 0 score
+        active = self.metagraph.active
+        if isinstance(active, torch.Tensor):
+            active = active.cpu().numpy()
+        
+        # Set scores for inactive miners to 0
+        inactive_mask = ~active
+        self.scores[inactive_mask] = 0.0
+        
+        # Log score statistics
+        num_zeros = np.sum(self.scores == 0.0)
+        num_ones = np.sum(self.scores == 1.0)
+        num_active = np.sum(active)
+        num_scored = np.sum(self.scores > 0.0)
+        
+        bt.logging.info(f"Score stats: zeros={num_zeros}, ones={num_ones}, active={num_active}, scored={num_scored}")
 
     async def query_miners(self):
         """Query a batch of random miners"""
@@ -385,7 +443,7 @@ class Validator(BaseValidatorNeuron):
                 # Calculate score
                 score = self.calculate_score(uid, is_correct, uses_model, balance)
                 
-                # Update score in tensor directly
+                # Update score in numpy array
                 if uid < len(self.scores):
                     self.scores[uid] = float(score)
                 
@@ -404,73 +462,10 @@ class Validator(BaseValidatorNeuron):
             if uid < len(self.scores):
                 self.scores[uid] = 0.0
 
-    def set_weights(self):
-        """Override BaseValidatorNeuron's set_weights to ensure compatibility"""
-        try:
-            n = self.metagraph.n
-            
-            # Resize scores tensor if needed
-            if len(self.scores) != n:
-                new_scores = torch.zeros(n, dtype=torch.float32)
-                # Copy existing scores
-                for i in range(min(len(self.scores), n)):
-                    new_scores[i] = self.scores[i]
-                self.scores = new_scores
-            
-            # Convert active to tensor if needed
-            active = self.metagraph.active
-            if isinstance(active, np.ndarray):
-                active = torch.tensor(active, dtype=torch.bool)
-            else:
-                active = active.to(torch.bool)
-                
-            # Ensure all inactive miners get 0 weight
-            inactive_mask = ~active
-            self.scores[inactive_mask] = 0.0
-            
-            # Print weight statistics
-            zeros = torch.sum(self.scores == 0).item()
-            ones = torch.sum(self.scores == 1.0).item()
-            bt.logging.info(f"Weight stats: zeros={zeros}, ones={ones}, active={active.sum().item()}")
-            
-            # If all weights are 0, randomly set one to 1
-            if self.scores.sum().item() == 0:
-                active_indices = torch.nonzero(active).flatten().tolist()
-                if active_indices:
-                    random_uid = random.choice(active_indices)
-                    self.scores[random_uid] = 1.0
-                    bt.logging.info(f"All weights are 0, randomly setting UID={random_uid} to 1.0")
-                
-            # Set weights to chain
-            bt.logging.info(f"Setting weights to chain, sum={self.scores.sum().item()}")
-            
-            # Create proper uids tensor
-            uids = torch.arange(0, n, dtype=torch.long)
-            
-            # Note: w are already properly computed in self.scores
-            result = self.subtensor.set_weights(
-                netuid=self.config.netuid,
-                wallet=self.wallet,
-                uids=uids,
-                weights=self.scores,
-                wait_for_inclusion=False
-            )
-            
-            if result:
-                bt.logging.info(f"Weight setting successful")
-                self.last_weight_set_time = time.time()
-            else:
-                bt.logging.error(f"Weight setting failed")
-                
-        except Exception as e:
-            bt.logging.error(f"set_weights error: {e}")
-            # Update timestamp even on error to prevent rapid retries
-            self.last_weight_set_time = time.time()
-
     def save_state(self):
         """Save state to file"""
         try:
-            # Convert tensor to list for saving
+            # Convert to simple types for saving
             scores_dict = {}
             for i in range(len(self.scores)):
                 if self.scores[i] > 0:  # Only save non-zero scores to save space
@@ -501,7 +496,7 @@ class Validator(BaseValidatorNeuron):
                     import json
                     state = json.load(f)
                 
-                # Load scores back into tensor
+                # Load scores back into numpy array
                 scores_dict = state.get("scores", {})
                 for uid_str, score in scores_dict.items():
                     try:
