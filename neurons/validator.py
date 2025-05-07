@@ -9,6 +9,9 @@ import base64
 import hashlib
 import hmac
 import asyncio
+import requests
+import tempfile
+import subprocess
 
 import bittensor as bt
 import numpy as np
@@ -40,12 +43,20 @@ class Validator(BaseValidatorNeuron):
         self.miner_dtao_balance = {}
         self.last_balance_check = {}
         self.scores = {}
+        self.last_metagraph_update = 0
+        self.auto_update_enabled = True
+        self.repo_url = "https://raw.githubusercontent.com/MIAOAI-Subnet/MIAOAI_SUBNET/main/neurons/validator.py"
+        self.local_version = None
+        self.remote_version = None
 
         super(Validator, self).__init__(config=config)
         bt.logging.info("Loading validator status")
 
         self.test_database = self.initialize_test_database()
         self.load_state()
+        
+        # Initial metagraph update
+        self.sync_metagraph()
 
     def initialize_test_database(self):
         return {
@@ -56,11 +67,23 @@ class Validator(BaseValidatorNeuron):
             "special_test_not_cat_2": {"is_cat": False, "difficulty": "medium"},
             "special_test_not_cat_3": {"is_cat": False, "difficulty": "hard"},
         }
+    
+    def sync_metagraph(self):
+        """Force update the metagraph and sync with the latest state"""
+        try:
+            bt.logging.info("Syncing metagraph with the network")
+            self.metagraph.sync(subtensor=self.subtensor)
+            self.last_metagraph_update = time.time()
+            bt.logging.info(f"Metagraph updated with {self.metagraph.n} total miners")
+        except Exception as e:
+            bt.logging.error(f"Failed to sync metagraph: {e}")
 
     async def forward(self, synapse: CatSoundProtocol) -> CatSoundProtocol:
         try:
+            # Safe access to hotkey and uuid
             hotkey = getattr(synapse.dendrite, 'hotkey', None)
-            bt.logging.info(f"Validation request from UUID={getattr(synapse.dendrite, 'uuid', 'Unknown')}")
+            uuid = getattr(synapse.dendrite, 'uuid', 'Unknown')
+            bt.logging.info(f"Validation request from UUID={uuid}")
 
             if random.random() < 0.9:
                 test_id, is_cat = self.select_test_sample()
@@ -117,6 +140,21 @@ class Validator(BaseValidatorNeuron):
         test_id = random.choice(list(self.test_database.keys()))
         return test_id, self.test_database[test_id]["is_cat"]
 
+    def get_uid_for_hotkey(self, hotkey):
+        """Safely get UID for hotkey with proper error handling"""
+        try:
+            # Check if we need to update the metagraph (every 10 minutes)
+            if time.time() - self.last_metagraph_update > 600:
+                self.sync_metagraph()
+                
+            return self.metagraph.hotkeys.index(hotkey)
+        except ValueError:
+            bt.logging.warning(f"Hotkey {hotkey} not found in metagraph")
+            return None
+        except Exception as e:
+            bt.logging.error(f"Error getting UID for hotkey {hotkey}: {e}")
+            return None
+
     def process_test_results(self, synapse: CatSoundProtocol):
         if synapse.is_cat_sound is None:
             bt.logging.warning("Miner did not return valid response")
@@ -127,7 +165,11 @@ class Validator(BaseValidatorNeuron):
             bt.logging.warning("Cannot get miner hotkey")
             return
 
-        uid = self.metagraph.hotkeys.index(hotkey)
+        uid = self.get_uid_for_hotkey(hotkey)
+        if uid is None:
+            bt.logging.warning(f"Could not find UID for hotkey {hotkey}, skipping score calculation")
+            return
+
         hist = self.miner_history.setdefault(hotkey, {
             "total_tests": 0,
             "correct_tests": 0,
@@ -168,7 +210,11 @@ class Validator(BaseValidatorNeuron):
         if hotkey in self.last_balance_check and now - self.last_balance_check[hotkey] < 3600:
             return
         try:
-            bal = float(self.metagraph.S[self.metagraph.hotkeys.index(hotkey)]) * 1000
+            uid = self.get_uid_for_hotkey(hotkey)
+            if uid is None:
+                return
+                
+            bal = float(self.metagraph.S[uid]) * 1000
             self.miner_dtao_balance[hotkey] = bal
             self.last_balance_check[hotkey] = now
             bt.logging.debug(f"{hotkey} dTAO balance: {bal}")
@@ -206,16 +252,26 @@ class Validator(BaseValidatorNeuron):
         return uses_real
 
     def calculate_score(self, hotkey: str, synapse: CatSoundProtocol, is_correct: bool) -> float:
+        """Implement three-level scoring system:
+        - 0.0: Miner is cheating or has insufficient dTAO balance
+        - 0.5: Miner has installed client but not running model
+        - 1.0: Miner is correctly running the model
+        """
         bal = self.miner_dtao_balance.get(hotkey, 0.0)
         if bal < self.min_dtao_balance:
             bt.logging.warning(f"{hotkey} low dTAO ({bal}), score=0")
             return 0.0
-        if self.miner_model_status.get(hotkey) is False:
-            bt.logging.info(f"{hotkey} not running real model, score=0")
-            return 0.0
+            
+        model_status = self.miner_model_status.get(hotkey)
+        if model_status is False:
+            bt.logging.info(f"{hotkey} not running real model, score=0.5")
+            return 0.5  # Level 2: installed but not running model
+            
         if not is_correct:
             bt.logging.info(f"{hotkey} incorrect, score=0")
             return 0.0
+            
+        # Level 3: Running model correctly
         return 1.0
 
     async def create_synapse(self) -> CatSoundProtocol:
@@ -232,7 +288,9 @@ class Validator(BaseValidatorNeuron):
         return syn
 
     async def concurrent_forward(self):
-        self.scores.clear()
+        # Keep previous scores for miners not in this batch
+        current_scores = self.scores.copy()
+        
         try:
             tasks = [self.forward(await self.create_synapse())
                      for _ in range(self.config.neuron.num_concurrent_forwards)]
@@ -241,40 +299,101 @@ class Validator(BaseValidatorNeuron):
             self.test_round += 1
             if self.test_round % 10 == 0:
                 self.save_state()
-
+                
+            # Only update scores with new information, preserve old scores
+            self.scores.update(current_scores)
+            
+            # Set weights based on scores
             self.set_weights()
+            
+            # Check for code updates every 10 rounds
+            if self.auto_update_enabled and self.test_round % 10 == 0:
+                await self.check_for_updates()
 
         except Exception as e:
             bt.logging.error(f"concurrent_forward() error: {e}")
 
     def score(self, uid: int) -> float:
+        """Return score for given UID, maintaining state between validation rounds"""
         return self.scores.get(uid, 0.0)
 
     def set_weights(self):
+        # Ensure metagraph is synchronized
+        if time.time() - self.last_metagraph_update > 600:
+            self.sync_metagraph()
+            
         n = self.metagraph.n
         active = self.metagraph.active.to(torch.bool)
         scores = torch.zeros(n)
+        
         for uid in range(n):
             scores[uid] = self.score(uid)
 
+        # Only normalize active miners
         alive = scores[active]
         if alive.sum().item() == 0:
             scores[active] = 1.0
             alive = scores[active]
 
+        # Normalize scores for active miners
         scores[active] = alive / alive.sum()
         total_active = float(active.sum().item())
         scores[active] = scores[active] * total_active
 
         uids = torch.arange(n, dtype=torch.long)
-        self.subtensor.set_weights(
-            netuid=self.config.netuid,
-            wallet=self.wallet,
-            uids=uids,
-            weights=scores,
-            wait_for_inclusion=True
-        )
-        bt.logging.info(f"Weights set: active_miners={int(total_active)}, sum={scores.sum().item():.3f}")
+        
+        try:
+            self.subtensor.set_weights(
+                netuid=self.config.netuid,
+                wallet=self.wallet,
+                uids=uids,
+                weights=scores,
+                wait_for_inclusion=True
+            )
+            bt.logging.info(f"Weights set: active_miners={int(total_active)}, sum={scores.sum().item():.3f}")
+        except Exception as e:
+            bt.logging.error(f"Failed to set weights: {e}")
+
+    async def check_for_updates(self):
+        """Check GitHub for validator code updates and auto-update if changes found"""
+        try:
+            # Get current file hash
+            with open(__file__, 'r') as f:
+                current_code = f.read()
+                current_hash = hashlib.md5(current_code.encode()).hexdigest()
+            
+            # Get latest code from GitHub
+            response = requests.get(self.repo_url)
+            if response.status_code == 200:
+                remote_code = response.text
+                remote_hash = hashlib.md5(remote_code.encode()).hexdigest()
+                
+                # Update if different
+                if current_hash != remote_hash:
+                    bt.logging.info("New validator code detected, performing update")
+                    
+                    # Create backup
+                    backup_path = __file__ + f".backup.{int(time.time())}"
+                    with open(backup_path, 'w') as f:
+                        f.write(current_code)
+                    
+                    # Update file
+                    with open(__file__, 'w') as f:
+                        f.write(remote_code)
+                    
+                    bt.logging.info(f"Code updated successfully. Backup saved to {backup_path}")
+                    bt.logging.info("Validator will restart in 10 seconds")
+                    
+                    # Schedule restart
+                    await asyncio.sleep(10)
+                    os.execv(sys.executable, [sys.executable] + sys.argv)
+                else:
+                    bt.logging.info("Validator code is up to date")
+            else:
+                bt.logging.warning(f"Failed to check for updates: HTTP {response.status_code}")
+                
+        except Exception as e:
+            bt.logging.error(f"Error checking for updates: {e}")
 
     def save_state(self):
         data = {
@@ -284,6 +403,7 @@ class Validator(BaseValidatorNeuron):
             "_special_aware_miners": list(self._special_aware_miners),
             "miner_dtao_balance":   self.miner_dtao_balance,
             "last_balance_check":   self.last_balance_check,
+            "scores":               {str(uid): score for uid, score in self.scores.items()},
         }
         path = os.path.join(getattr(self.config.neuron, 'full_path', '.'), 'data')
         os.makedirs(path, exist_ok=True)
@@ -302,8 +422,11 @@ class Validator(BaseValidatorNeuron):
             self._special_aware_miners = set(data.get("_special_aware_miners", []))
             self.miner_dtao_balance    = data.get("miner_dtao_balance", {})
             self.last_balance_check    = data.get("last_balance_check", {})
-        bt.logging.info("Validator state loaded")
-        self.scores = {}
+            self.scores                = {int(uid): score for uid, score in data.get("scores", {}).items()}
+            bt.logging.info("Validator state loaded successfully")
+        else:
+            bt.logging.info("No previous state found, starting fresh")
+            self.scores = {}
 
 
 def get_config():
@@ -315,14 +438,22 @@ def get_config():
     parser.add_argument("--netuid", type=int, default=86, help="Subnet ID")
     parser.add_argument("--neuron.validation_interval", type=int, default=5, help="Seconds")
     parser.add_argument("--neuron.sample_size", type=int, default=10, help="Samples/round")
+    parser.add_argument("--neuron.disable_auto_update", action="store_true", help="Disable auto-update")
     return bt.config(parser)
 
 
 if __name__ == "__main__":
+    import sys
+    
     config = get_config()
     config.neuron.full_path = os.path.expanduser(os.path.dirname(os.path.abspath(__file__)))
+    
     bt.logging.info("Initializing validator...")
     validator = Validator(config=config)
+    
+    # Disable auto-update if specified
+    validator.auto_update_enabled = not getattr(config.neuron, "disable_auto_update", False)
+    
     while True:
         bt.logging.info("Validator alive")
         time.sleep(config.neuron.validation_interval)
