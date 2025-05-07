@@ -340,7 +340,7 @@ class Validator(BaseValidatorNeuron):
             
             # Check if scores is a numpy array and convert to dictionary if needed
             if isinstance(self.scores, np.ndarray):
-                scores_dict = {i: score for i, score in enumerate(self.scores) if i < len(weights)}
+                scores_dict = {i: float(score) for i, score in enumerate(self.scores) if i < len(weights)}
             else:
                 scores_dict = self.scores
             
@@ -352,7 +352,8 @@ class Validator(BaseValidatorNeuron):
                     except ValueError:
                         continue
                 if uid < len(weights):
-                    weights[uid] = score
+                    # 确保使用Python float，而不是numpy.float32
+                    weights[uid] = float(score)
             
             # Normalize the weights
             if torch.sum(weights) > 0:
@@ -372,7 +373,7 @@ class Validator(BaseValidatorNeuron):
             
             # Store scores for future reference
             # Important: Store as dictionary to avoid numpy array issues
-            self.scores = {uid: weights[uid].item() for uid in range(len(weights))}
+            self.scores = {uid: float(weights[uid].item()) for uid in range(len(weights))}
             
             bt.logging.info("Weights set successfully with three-tier scoring system")
         except Exception as e:
