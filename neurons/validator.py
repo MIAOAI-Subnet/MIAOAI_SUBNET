@@ -9,9 +9,7 @@ import base64
 import hashlib
 import hmac
 import asyncio
-import requests
-import tempfile
-import subprocess
+import sys
 
 import bittensor as bt
 import numpy as np
@@ -42,12 +40,10 @@ class Validator(BaseValidatorNeuron):
         self.min_dtao_balance = 50.0
         self.miner_dtao_balance = {}
         self.last_balance_check = {}
-        self.scores = {}
+        self.scores = {}  # Use dictionary instead of ndarray
         self.last_metagraph_update = 0
         self.auto_update_enabled = True
         self.repo_url = "https://raw.githubusercontent.com/MIAOAI-Subnet/MIAOAI_SUBNET/main/neurons/validator.py"
-        self.local_version = None
-        self.remote_version = None
 
         super(Validator, self).__init__(config=config)
         bt.logging.info("Loading validator status")
@@ -55,7 +51,7 @@ class Validator(BaseValidatorNeuron):
         self.test_database = self.initialize_test_database()
         self.load_state()
         
-        # Initial metagraph update
+        # Ensure metagraph is synced on initialization
         self.sync_metagraph()
 
     def initialize_test_database(self):
@@ -69,7 +65,7 @@ class Validator(BaseValidatorNeuron):
         }
     
     def sync_metagraph(self):
-        """Force update the metagraph and sync with the latest state"""
+        """Force update the metagraph and sync with the network"""
         try:
             bt.logging.info("Syncing metagraph with the network")
             self.metagraph.sync(subtensor=self.subtensor)
@@ -80,7 +76,7 @@ class Validator(BaseValidatorNeuron):
 
     async def forward(self, synapse: CatSoundProtocol) -> CatSoundProtocol:
         try:
-            # Safe access to hotkey and uuid
+            # Safely get hotkey and uuid
             hotkey = getattr(synapse.dendrite, 'hotkey', None)
             uuid = getattr(synapse.dendrite, 'uuid', 'Unknown')
             bt.logging.info(f"Validation request from UUID={uuid}")
@@ -143,11 +139,16 @@ class Validator(BaseValidatorNeuron):
     def get_uid_for_hotkey(self, hotkey):
         """Safely get UID for hotkey with proper error handling"""
         try:
-            # Check if we need to update the metagraph (every 10 minutes)
-            if time.time() - self.last_metagraph_update > 600:
+            # Check if metagraph needs updating
+            if time.time() - self.last_metagraph_update > 300:  # 5 minutes
                 self.sync_metagraph()
                 
-            return self.metagraph.hotkeys.index(hotkey)
+            # Directly check if hotkey exists
+            if hotkey in self.metagraph.hotkeys:
+                return self.metagraph.hotkeys.index(hotkey)
+            
+            bt.logging.warning(f"Hotkey {hotkey} not found in metagraph")
+            return None
         except ValueError:
             bt.logging.warning(f"Hotkey {hotkey} not found in metagraph")
             return None
@@ -202,7 +203,7 @@ class Validator(BaseValidatorNeuron):
         self.detect_model_usage(hotkey)
 
         score = self.calculate_score(hotkey, synapse, is_correct)
-        self.scores[uid] = score
+        self.scores[uid] = float(score)  # Ensure value is standard Python type
         bt.logging.info(f"Miner {uid} score: {score}")
 
     def check_dtao_balance(self, hotkey: str):
@@ -252,7 +253,7 @@ class Validator(BaseValidatorNeuron):
         return uses_real
 
     def calculate_score(self, hotkey: str, synapse: CatSoundProtocol, is_correct: bool) -> float:
-        """Implement three-level scoring system:
+        """Implement three-tier scoring system:
         - 0.0: Miner is cheating or has insufficient dTAO balance
         - 0.5: Miner has installed client but not running model
         - 1.0: Miner is correctly running the model
@@ -265,13 +266,13 @@ class Validator(BaseValidatorNeuron):
         model_status = self.miner_model_status.get(hotkey)
         if model_status is False:
             bt.logging.info(f"{hotkey} not running real model, score=0.5")
-            return 0.5  # Level 2: installed but not running model
+            return 0.5  # Tier 2: installed but not running model
             
         if not is_correct:
-            bt.logging.info(f"{hotkey} incorrect, score=0")
+            bt.logging.info(f"{hotkey} incorrect response, score=0")
             return 0.0
             
-        # Level 3: Running model correctly
+        # Tier 3: Running model correctly
         return 1.0
 
     async def create_synapse(self) -> CatSoundProtocol:
@@ -288,61 +289,71 @@ class Validator(BaseValidatorNeuron):
         return syn
 
     async def concurrent_forward(self):
-        # Keep previous scores for miners not in this batch
-        current_scores = self.scores.copy()
+        # Keep previous scores
+        old_scores = self.scores.copy()
         
         try:
+            # Ensure metagraph is up to date
+            if time.time() - self.last_metagraph_update > 300:
+                self.sync_metagraph()
+                
             tasks = [self.forward(await self.create_synapse())
-                     for _ in range(self.config.neuron.num_concurrent_forwards)]
+                     for _ in range(self.config.neuron.sample_size)]
             await asyncio.gather(*tasks)
 
             self.test_round += 1
             if self.test_round % 10 == 0:
                 self.save_state()
-                
-            # Only update scores with new information, preserve old scores
-            self.scores.update(current_scores)
-            
-            # Set weights based on scores
+
+            # Set weights
             self.set_weights()
-            
-            # Check for code updates every 10 rounds
-            if self.auto_update_enabled and self.test_round % 10 == 0:
-                await self.check_for_updates()
 
         except Exception as e:
             bt.logging.error(f"concurrent_forward() error: {e}")
+            # Restore previous scores if there was an error
+            self.scores = old_scores
 
     def score(self, uid: int) -> float:
         """Return score for given UID, maintaining state between validation rounds"""
-        return self.scores.get(uid, 0.0)
+        return float(self.scores.get(uid, 0.0))
 
     def set_weights(self):
-        # Ensure metagraph is synchronized
-        if time.time() - self.last_metagraph_update > 600:
+        # Ensure metagraph is up to date
+        if time.time() - self.last_metagraph_update > 300:
             self.sync_metagraph()
             
-        n = self.metagraph.n
-        active = self.metagraph.active.to(torch.bool)
-        scores = torch.zeros(n)
-        
-        for uid in range(n):
-            scores[uid] = self.score(uid)
-
-        # Only normalize active miners
-        alive = scores[active]
-        if alive.sum().item() == 0:
-            scores[active] = 1.0
-            alive = scores[active]
-
-        # Normalize scores for active miners
-        scores[active] = alive / alive.sum()
-        total_active = float(active.sum().item())
-        scores[active] = scores[active] * total_active
-
-        uids = torch.arange(n, dtype=torch.long)
-        
         try:
+            n = self.metagraph.n
+            active = self.metagraph.active.to(torch.bool)
+            
+            # Initialize as float tensor
+            scores = torch.zeros(n, dtype=torch.float32) 
+            
+            # Fill tensor with scores
+            for uid in range(n):
+                score_value = self.score(uid)
+                scores[uid] = float(score_value)
+                
+            # Print scores for each miner
+            for uid in range(n):
+                if scores[uid] > 0:
+                    bt.logging.info(f"Miner {uid} weight score: {scores[uid]}")
+
+            # Filter scores for active miners
+            active_scores = scores[active]
+            if active_scores.sum().item() == 0:
+                # If no valid scores, distribute evenly
+                scores[active] = 1.0
+                active_scores = scores[active]
+
+            # Normalize scores for active miners
+            if active_scores.sum().item() > 0:  # Avoid division by zero
+                scores[active] = active_scores / active_scores.sum()
+                total_active = float(active.sum().item())
+                scores[active] = scores[active] * total_active
+            
+            # Set weights
+            uids = torch.arange(n, dtype=torch.long)
             self.subtensor.set_weights(
                 netuid=self.config.netuid,
                 wallet=self.wallet,
@@ -350,82 +361,64 @@ class Validator(BaseValidatorNeuron):
                 weights=scores,
                 wait_for_inclusion=True
             )
-            bt.logging.info(f"Weights set: active_miners={int(total_active)}, sum={scores.sum().item():.3f}")
+            bt.logging.info(f"Weights set: active_miners={int(active.sum().item())}, sum={scores.sum().item():.3f}")
+            
         except Exception as e:
             bt.logging.error(f"Failed to set weights: {e}")
-
-    async def check_for_updates(self):
-        """Check GitHub for validator code updates and auto-update if changes found"""
-        try:
-            # Get current file hash
-            with open(__file__, 'r') as f:
-                current_code = f.read()
-                current_hash = hashlib.md5(current_code.encode()).hexdigest()
-            
-            # Get latest code from GitHub
-            response = requests.get(self.repo_url)
-            if response.status_code == 200:
-                remote_code = response.text
-                remote_hash = hashlib.md5(remote_code.encode()).hexdigest()
-                
-                # Update if different
-                if current_hash != remote_hash:
-                    bt.logging.info("New validator code detected, performing update")
-                    
-                    # Create backup
-                    backup_path = __file__ + f".backup.{int(time.time())}"
-                    with open(backup_path, 'w') as f:
-                        f.write(current_code)
-                    
-                    # Update file
-                    with open(__file__, 'w') as f:
-                        f.write(remote_code)
-                    
-                    bt.logging.info(f"Code updated successfully. Backup saved to {backup_path}")
-                    bt.logging.info("Validator will restart in 10 seconds")
-                    
-                    # Schedule restart
-                    await asyncio.sleep(10)
-                    os.execv(sys.executable, [sys.executable] + sys.argv)
-                else:
-                    bt.logging.info("Validator code is up to date")
-            else:
-                bt.logging.warning(f"Failed to check for updates: HTTP {response.status_code}")
-                
-        except Exception as e:
-            bt.logging.error(f"Error checking for updates: {e}")
+            bt.logging.error(f"Error type: {type(e)}")
+            import traceback
+            bt.logging.error(traceback.format_exc())
 
     def save_state(self):
-        data = {
-            "miner_history":        self.miner_history,
-            "miner_model_status":   self.miner_model_status,
-            "test_round":           self.test_round,
-            "_special_aware_miners": list(self._special_aware_miners),
-            "miner_dtao_balance":   self.miner_dtao_balance,
-            "last_balance_check":   self.last_balance_check,
-            "scores":               {str(uid): score for uid, score in self.scores.items()},
-        }
-        path = os.path.join(getattr(self.config.neuron, 'full_path', '.'), 'data')
-        os.makedirs(path, exist_ok=True)
-        with open(os.path.join(path, 'validator_state.json'), 'w') as f:
-            json.dump(data, f)
-        bt.logging.info("Validator state saved")
+        try:
+            # Convert scores to serializable format
+            serializable_scores = {}
+            for uid, score in self.scores.items():
+                serializable_scores[str(uid)] = float(score)
+                
+            data = {
+                "miner_history":        self.miner_history,
+                "miner_model_status":   self.miner_model_status,
+                "test_round":           self.test_round,
+                "_special_aware_miners": list(self._special_aware_miners),
+                "miner_dtao_balance":   self.miner_dtao_balance,
+                "last_balance_check":   self.last_balance_check,
+                "scores":               serializable_scores,
+            }
+            path = os.path.join(getattr(self.config.neuron, 'full_path', '.'), 'data')
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, 'validator_state.json'), 'w') as f:
+                json.dump(data, f)
+            bt.logging.info("Validator state saved")
+        except Exception as e:
+            bt.logging.error(f"Failed to save state: {e}")
+            import traceback
+            bt.logging.error(traceback.format_exc())
 
     def load_state(self):
         path = os.path.join(getattr(self.config.neuron, 'full_path', '.'), 'data', 'validator_state.json')
         if os.path.exists(path):
-            with open(path, 'r') as f:
-                data = json.load(f)
-            self.miner_history         = data.get("miner_history", {})
-            self.miner_model_status    = data.get("miner_model_status", {})
-            self.test_round            = data.get("test_round", 0)
-            self._special_aware_miners = set(data.get("_special_aware_miners", []))
-            self.miner_dtao_balance    = data.get("miner_dtao_balance", {})
-            self.last_balance_check    = data.get("last_balance_check", {})
-            self.scores                = {int(uid): score for uid, score in data.get("scores", {}).items()}
-            bt.logging.info("Validator state loaded successfully")
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                self.miner_history         = data.get("miner_history", {})
+                self.miner_model_status    = data.get("miner_model_status", {})
+                self.test_round            = data.get("test_round", 0)
+                self._special_aware_miners = set(data.get("_special_aware_miners", []))
+                self.miner_dtao_balance    = data.get("miner_dtao_balance", {})
+                self.last_balance_check    = data.get("last_balance_check", {})
+                
+                # Load scores (ensure integer UIDs as keys)
+                self.scores = {}
+                for uid_str, score in data.get("scores", {}).items():
+                    self.scores[int(uid_str)] = float(score)
+                    
+                bt.logging.info("Validator state loaded successfully")
+            except Exception as e:
+                bt.logging.error(f"Failed to load state: {e}")
+                self.scores = {}
         else:
-            bt.logging.info("No previous state found, starting fresh")
+            bt.logging.info("No state file found, starting fresh")
             self.scores = {}
 
 
@@ -436,9 +429,8 @@ def get_config():
     bt.logging.add_args(parser)
     bt.wallet.add_args(parser)
     parser.add_argument("--netuid", type=int, default=86, help="Subnet ID")
-    parser.add_argument("--neuron.validation_interval", type=int, default=5, help="Seconds")
-    parser.add_argument("--neuron.sample_size", type=int, default=10, help="Samples/round")
-    parser.add_argument("--neuron.disable_auto_update", action="store_true", help="Disable auto-update")
+    parser.add_argument("--neuron.validation_interval", type=int, default=5, help="Validation interval (seconds)")
+    parser.add_argument("--neuron.sample_size", type=int, default=10, help="Samples per round")
     return bt.config(parser)
 
 
@@ -451,9 +443,6 @@ if __name__ == "__main__":
     bt.logging.info("Initializing validator...")
     validator = Validator(config=config)
     
-    # Disable auto-update if specified
-    validator.auto_update_enabled = not getattr(config.neuron, "disable_auto_update", False)
-    
     while True:
-        bt.logging.info("Validator alive")
+        bt.logging.info("Validator running")
         time.sleep(config.neuron.validation_interval)
