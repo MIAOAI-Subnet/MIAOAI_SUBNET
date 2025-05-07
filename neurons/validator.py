@@ -19,7 +19,7 @@ def get_config():
     bt.logging.add_args(parser)
     bt.wallet.add_args(parser)
     parser.add_argument("--netuid", type=int, default=86, help="Subnet ID")
-    parser.add_argument("--neuron.validation_interval", type=int, default=30, help="Validation interval (seconds)")
+    parser.add_argument("--neuron.validation_interval", type=int, default=60, help="Validation interval (seconds)")
     parser.add_argument("--neuron.sample_size", type=int, default=10, help="Number of miners to sample per round")
     return bt.config(parser)
 
@@ -73,16 +73,21 @@ class Validator(BaseValidatorNeuron):
 
     async def create_synapse(self) -> CatSoundProtocol:
         """Create a new synapse object for concurrent_forward"""
-        synapse = CatSoundProtocol()
+        # Create synapse with required audio_data field
+        synapse = CatSoundProtocol(audio_data="")
+        
         # 20% chance of special test to detect cheating
         special = (random.random() < 0.2)
         tid, is_cat = self.select_test_sample()
         encoded = self._encode_test(tid, special)
         
+        # Set the audio_data field (REQUIRED by protocol)
         synapse.audio_data = encoded
-        synapse.sample_id = tid
-        synapse.ground_truth = is_cat
-        synapse.is_special = special
+        
+        # Store ground truth in metadata
+        synapse._ground_truth = is_cat
+        synapse._test_id = tid
+        synapse._is_special = special
         
         return synapse
 
@@ -146,11 +151,7 @@ class Validator(BaseValidatorNeuron):
         return score
 
     async def forward(self, synapse: CatSoundProtocol) -> CatSoundProtocol:
-        """
-        Standard forward method called by BaseValidatorNeuron:
-        1) Process previous response
-        2) Prepare and send new request
-        """
+        """Standard forward method called by BaseValidatorNeuron"""
         try:
             # Check if we have a hotkey (processing previous response)
             hotkey = getattr(synapse.dendrite, 'hotkey', None)
@@ -158,194 +159,28 @@ class Validator(BaseValidatorNeuron):
                 try:
                     uid = self.metagraph.hotkeys.index(hotkey)
                     
-                    # Check for prediction results
-                    if hasattr(synapse, 'response') and hasattr(synapse.response, 'predictions'):
-                        preds = synapse.response.predictions
-                        if isinstance(preds, list) and len(preds) > 0:
-                            pred = preds[0]
-                            if isinstance(pred, dict) and 'is_cat' in pred:
-                                # Get prediction and ground truth
-                                is_cat_pred = pred['is_cat']
-                                is_cat_true = getattr(synapse, 'ground_truth', None)
-                                
-                                if is_cat_true is not None:
-                                    # Determine correctness
-                                    is_correct = (is_cat_pred == is_cat_true)
-                                    
-                                    # Check special marker
-                                    is_special = getattr(synapse, 'is_special', False)
-                                    identified_special = False
-                                    
-                                    if is_special and hasattr(synapse.response, 'special_marker'):
-                                        special_marker = synapse.response.special_marker
-                                        if special_marker and self._special_mark in special_marker:
-                                            identified_special = True
-                                            self._special_aware_miners.add(uid)
-                                            bt.logging.info(f"UID={uid} identified special marker")
-                                    
-                                    # Update history
-                                    if uid not in self.miner_history:
-                                        self.miner_history[uid] = []
-                                        
-                                    self.miner_history[uid].append({
-                                        'timestamp': time.time(),
-                                        'correct': is_correct,
-                                        'special': is_special,
-                                        'identified_special': identified_special
-                                    })
-                                    
-                                    # Limit history length
-                                    if len(self.miner_history[uid]) > 100:
-                                        self.miner_history[uid] = self.miner_history[uid][-100:]
-                                    
-                                    # Detect model usage
-                                    uses_model = self.detect_model_usage(uid)
-                                    self.miner_model_status[uid] = uses_model
-                                    
-                                    # Get balance
-                                    balance = float(self.metagraph.S[uid]) * 1000
-                                    
-                                    # Calculate score
-                                    score = self.calculate_score(uid, is_correct, uses_model, balance)
-                                    self.scores[str(uid)] = score
-                                    
-                                    bt.logging.info(f"UID={uid} result: correct={is_correct}, model={uses_model}, score={score}")
-                                else:
-                                    bt.logging.warning(f"UID={uid} response missing ground_truth")
-                                    self.scores[str(uid)] = 0.0
-                            else:
-                                bt.logging.warning(f"UID={uid} invalid prediction format")
-                                self.scores[str(uid)] = 0.0
-                        else:
-                            bt.logging.warning(f"UID={uid} invalid predictions list")
-                            self.scores[str(uid)] = 0.0
-                    else:
-                        bt.logging.warning(f"UID={uid} response missing predictions")
-                        self.scores[str(uid)] = 0.0
-                
-                except ValueError:
-                    bt.logging.warning(f"Hotkey={hotkey} not found in metagraph")
-                except Exception as e:
-                    bt.logging.error(f"Error processing response: {e}")
-            
-            # Prepare new request
-            special = (random.random() < 0.2)
-            tid, is_cat = self.select_test_sample()
-            encoded = self._encode_test(tid, special)
-            
-            synapse.audio_data = encoded
-            synapse.sample_id = tid
-            synapse.ground_truth = is_cat
-            synapse.is_special = special
-            
-            return synapse
-            
-        except Exception as e:
-            bt.logging.error(f"Forward error: {e}")
-            return synapse
-
-    async def run_step(self):
-        """Standard run step for BaseValidatorNeuron"""
-        try:
-            # Sync metagraph
-            self.metagraph.sync(subtensor=self.subtensor)
-            bt.logging.info(f"Metagraph synced, miners={self.metagraph.n}")
-            
-            # Check if weights should be set
-            current_time = time.time()
-            should_set_weights = (current_time - self.last_weight_set_time) > 1800  # 30 minutes
-            
-            if should_set_weights or self._state.get("round", 0) % 10 == 0:
-                # Set weights
-                self.set_weights_direct()
-                self.save_state()
-                
-            # Query miners
-            await self.query_miners()
-            
-            # Update round counter
-            self._state["round"] = self._state.get("round", 0) + 1
-            
-            # Add appropriate sleep
-            await asyncio.sleep(max(15, self.config.neuron.validation_interval))
-            
-        except Exception as e:
-            bt.logging.error(f"Run step error: {e}")
-            await asyncio.sleep(30)  # Longer sleep to prevent rapid restart loops
-
-    async def query_miners(self):
-        """Query a batch of random miners"""
-        try:
-            # Determine query count
-            n = min(self.config.neuron.sample_size, self.metagraph.n)
-            if n <= 0:
-                bt.logging.warning("No miners available to query")
-                return
-                
-            # Find active miners - convert numpy array to tensor if needed
-            active = self.metagraph.active
-            if isinstance(active, np.ndarray):
-                active = torch.tensor(active, dtype=torch.bool)
-            else:
-                active = active.to(torch.bool)
-                
-            active_indices = torch.nonzero(active).flatten().tolist()
-            if not active_indices:
-                bt.logging.warning("No active miners")
-                return
-                
-            # Randomly select miners
-            selected_uids = random.sample(active_indices, min(n, len(active_indices)))
-            bt.logging.info(f"Selected {len(selected_uids)} miners for this round")
-            
-            # Create query tasks
-            tasks = []
-            for uid in selected_uids:
-                synapse = await self.create_synapse()
-                axon = self.metagraph.axons[uid]
-                
-                # Set timeout mechanism
-                task = asyncio.create_task(
-                    self._query_single_miner(uid, axon, synapse)
-                )
-                tasks.append(task)
-            
-            # Wait for all tasks to complete
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-                
-        except Exception as e:
-            bt.logging.error(f"Query miners error: {e}")
-
-    async def _query_single_miner(self, uid, axon, synapse):
-        """Query a single miner with timeout handling"""
-        try:
-            bt.logging.info(f"Querying UID={uid}")
-            
-            # Set timeout
-            response = await asyncio.wait_for(
-                self.dendrite.forward(axon, synapse, deserialize=True),
-                timeout=10.0
-            )
-            
-            # Process response
-            if hasattr(response, 'predictions'):
-                preds = response.predictions
-                if isinstance(preds, list) and len(preds) > 0:
-                    pred = preds[0]
-                    if isinstance(pred, dict) and 'is_cat' in pred:
-                        # Get prediction
-                        is_cat_pred = pred['is_cat']
-                        is_cat_true = synapse.ground_truth
-                        is_correct = (is_cat_pred == is_cat_true)
+                    # Get the is_cat_sound field from response
+                    is_cat_pred = getattr(synapse, 'is_cat_sound', None)
+                    ground_truth = getattr(synapse, '_ground_truth', None)
+                    
+                    if is_cat_pred is not None and ground_truth is not None:
+                        # Determine correctness
+                        is_correct = (is_cat_pred == ground_truth)
                         
                         # Check special marker
-                        is_special = getattr(synapse, 'is_special', False)
+                        is_special = getattr(synapse, '_is_special', False)
                         identified_special = False
                         
-                        if is_special and hasattr(response, 'special_marker'):
-                            special_marker = response.special_marker
-                            if special_marker and self._special_mark in special_marker:
+                        # Look for special marker in response
+                        if is_special:
+                            # app_cat_fixed.py might return special marker in different fields
+                            special_response = ""
+                            if hasattr(synapse, 'special_marker'):
+                                special_response = synapse.special_marker
+                            elif hasattr(synapse, 'confidence_level'):
+                                special_response = str(synapse.confidence_level)
+                                
+                            if special_response and self._special_mark in special_response:
                                 identified_special = True
                                 self._special_aware_miners.add(uid)
                                 bt.logging.info(f"UID={uid} identified special marker")
@@ -374,17 +209,184 @@ class Validator(BaseValidatorNeuron):
                         
                         # Calculate score
                         score = self.calculate_score(uid, is_correct, uses_model, balance)
-                        self.scores[str(uid)] = score
+                        self.scores[str(uid)] = float(score)
                         
-                        bt.logging.info(f"UID={uid} query result: correct={is_correct}, model={uses_model}, score={score}")
+                        bt.logging.info(f"UID={uid} result: correct={is_correct}, model={uses_model}, score={score}")
                     else:
-                        bt.logging.warning(f"UID={uid} invalid prediction format")
+                        bt.logging.warning(f"UID={uid} missing prediction or ground truth")
                         self.scores[str(uid)] = 0.0
-                else:
-                    bt.logging.warning(f"UID={uid} invalid predictions list")
-                    self.scores[str(uid)] = 0.0
+                
+                except ValueError:
+                    bt.logging.warning(f"Hotkey={hotkey} not found in metagraph")
+                except Exception as e:
+                    bt.logging.error(f"Error processing response: {e}")
+            
+            # Prepare new request
+            special = (random.random() < 0.2)
+            tid, is_cat = self.select_test_sample()
+            encoded = self._encode_test(tid, special)
+            
+            # Set the required field
+            synapse.audio_data = encoded
+            
+            # Store metadata for next round
+            synapse._test_id = tid
+            synapse._ground_truth = is_cat
+            synapse._is_special = special
+            
+            # Reset previous response fields
+            synapse.is_cat_sound = None
+            synapse.probability = None
+            synapse.confidence_level = None
+            synapse.response_time = None
+            
+            return synapse
+            
+        except Exception as e:
+            bt.logging.error(f"Forward error: {e}")
+            # Ensure audio_data is always set
+            synapse.audio_data = base64.b64encode(b"ERROR").decode("utf-8")
+            return synapse
+
+    async def run_step(self):
+        """Standard run step for BaseValidatorNeuron"""
+        try:
+            # Sync metagraph
+            self.metagraph.sync(subtensor=self.subtensor)
+            bt.logging.info(f"Metagraph synced, miners={self.metagraph.n}")
+            
+            # Check if weights should be set (every 30 minutes)
+            current_time = time.time()
+            should_set_weights = (current_time - self.last_weight_set_time) > 1800
+            
+            if should_set_weights or self._state.get("round", 0) % 10 == 0:
+                # Set weights
+                self.set_weights_direct()
+                self.save_state()
+                
+            # Query miners
+            await self.query_miners()
+            
+            # Update round counter
+            self._state["round"] = self._state.get("round", 0) + 1
+            
+            # Add longer sleep to avoid rate limits
+            await asyncio.sleep(self.config.neuron.validation_interval)
+            
+        except Exception as e:
+            bt.logging.error(f"Run step error: {e}")
+            # Sleep longer on error to avoid rapid restart loops
+            await asyncio.sleep(60)
+
+    async def query_miners(self):
+        """Query a batch of random miners"""
+        try:
+            # Determine query count
+            n = min(self.config.neuron.sample_size, self.metagraph.n)
+            if n <= 0:
+                bt.logging.warning("No miners available to query")
+                return
+                
+            # Find active miners
+            active = self.metagraph.active
+            if isinstance(active, np.ndarray):
+                active = torch.tensor(active, dtype=torch.bool)
             else:
-                bt.logging.warning(f"UID={uid} response missing predictions")
+                active = active.to(torch.bool)
+                
+            active_indices = torch.nonzero(active).flatten().tolist()
+            if not active_indices:
+                bt.logging.warning("No active miners")
+                return
+                
+            # Randomly select miners
+            selected_uids = random.sample(active_indices, min(n, len(active_indices)))
+            bt.logging.info(f"Selected {len(selected_uids)} miners for this round")
+            
+            # Create query tasks
+            tasks = []
+            for uid in selected_uids:
+                synapse = await self.create_synapse()
+                axon = self.metagraph.axons[uid]
+                
+                # Add task with timeout
+                task = asyncio.create_task(
+                    self._query_single_miner(uid, axon, synapse)
+                )
+                tasks.append(task)
+            
+            # Wait for all tasks to complete
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                
+        except Exception as e:
+            bt.logging.error(f"Query miners error: {e}")
+
+    async def _query_single_miner(self, uid, axon, synapse):
+        """Query a single miner with timeout handling"""
+        try:
+            bt.logging.info(f"Querying UID={uid}")
+            
+            # Set timeout
+            response = await asyncio.wait_for(
+                self.dendrite.forward(axon, synapse, deserialize=True),
+                timeout=10.0
+            )
+            
+            # Process response using CatSoundProtocol fields
+            is_cat_pred = getattr(response, 'is_cat_sound', None)
+            ground_truth = getattr(synapse, '_ground_truth', None)
+            
+            if is_cat_pred is not None and ground_truth is not None:
+                # Determine correctness
+                is_correct = (is_cat_pred == ground_truth)
+                
+                # Check special marker
+                is_special = getattr(synapse, '_is_special', False)
+                identified_special = False
+                
+                # Check for special marker in different fields
+                if is_special:
+                    special_response = ""
+                    if hasattr(response, 'special_marker'):
+                        special_response = response.special_marker
+                    elif hasattr(response, 'confidence_level'):
+                        special_response = str(response.confidence_level)
+                        
+                    if special_response and self._special_mark in special_response:
+                        identified_special = True
+                        self._special_aware_miners.add(uid)
+                        bt.logging.info(f"UID={uid} identified special marker")
+                
+                # Update history
+                if uid not in self.miner_history:
+                    self.miner_history[uid] = []
+                    
+                self.miner_history[uid].append({
+                    'timestamp': time.time(),
+                    'correct': is_correct,
+                    'special': is_special,
+                    'identified_special': identified_special
+                })
+                
+                # Limit history length
+                if len(self.miner_history[uid]) > 100:
+                    self.miner_history[uid] = self.miner_history[uid][-100:]
+                
+                # Detect model usage
+                uses_model = self.detect_model_usage(uid)
+                self.miner_model_status[uid] = uses_model
+                
+                # Get balance
+                balance = float(self.metagraph.S[uid]) * 1000
+                
+                # Calculate score
+                score = self.calculate_score(uid, is_correct, uses_model, balance)
+                self.scores[str(uid)] = score
+                
+                bt.logging.info(f"UID={uid} query result: correct={is_correct}, model={uses_model}, score={score}")
+            else:
+                bt.logging.warning(f"UID={uid} invalid response format")
                 self.scores[str(uid)] = 0.0
             
         except asyncio.TimeoutError:
@@ -399,7 +401,7 @@ class Validator(BaseValidatorNeuron):
         try:
             n = self.metagraph.n
             
-            # Convert active to tensor if it's numpy array
+            # Convert active to tensor if needed
             active = self.metagraph.active
             if isinstance(active, np.ndarray):
                 active = torch.tensor(active, dtype=torch.bool)
@@ -408,7 +410,7 @@ class Validator(BaseValidatorNeuron):
                 
             w = torch.zeros(n, dtype=torch.float32)
 
-            # Set weights directly from scores, no normalization
+            # Set weights directly from scores
             bt.logging.info("Setting direct weights (no normalization):")
             
             # Ensure all inactive miners get 0 weight
@@ -444,10 +446,14 @@ class Validator(BaseValidatorNeuron):
                 
             # Set weights to chain
             bt.logging.info(f"Setting weights to chain, sum={w.sum().item()}")
+            
+            # Create proper uids tensor
+            uids = torch.arange(0, n, dtype=torch.long)
+            
             result = self.subtensor.set_weights(
                 netuid=self.config.netuid,
                 wallet=self.wallet,
-                uids=torch.arange(n, dtype=torch.long),
+                uids=uids,
                 weights=w,
                 wait_for_inclusion=False
             )
@@ -504,20 +510,14 @@ class Validator(BaseValidatorNeuron):
 
     async def concurrent_forward(self):
         """
-        This method is called by BaseValidatorNeuron's run() method.
-        We implement it to avoid compatibility issues with the base class.
+        This method is required by BaseValidatorNeuron
         """
         try:
-            # In case metagraph hasn't been synced yet
-            if not hasattr(self.metagraph, 'n') or self.metagraph.n == 0:
-                self.metagraph.sync(subtensor=self.subtensor)
-                
-            # Just delegate to run_step which has our main logic
+            # Just call run_step which contains our main logic
             await self.run_step()
-            
         except Exception as e:
             bt.logging.error(f"concurrent_forward error: {e}")
-            await asyncio.sleep(30)  # Add delay to prevent rapid restarts
+            await asyncio.sleep(30)
 
 if __name__ == "__main__":
     # Ensure required modules are imported
