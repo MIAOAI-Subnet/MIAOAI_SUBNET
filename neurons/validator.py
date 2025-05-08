@@ -49,6 +49,9 @@ class Validator(BaseValidatorNeuron):
         self.last_weight_set_time = 0
         self._state = {"round": 0}
         
+        # List of known validator UIDs - exclude these from querying
+        self.known_validators = {0, 11, 15, 22, 235}  # Known validator UIDs based on screenshots
+        
         # Initialize base class - Important: this will set self.scores as numpy array
         super(Validator, self).__init__(config=config)
         
@@ -105,11 +108,12 @@ class Validator(BaseValidatorNeuron):
             bt.logging.warning(f"Initial sync failed, will retry during runtime: {e}")
 
     def select_test_sample(self):
-        # Randomly select a test sample (ID and ground truth)
+        """Randomly select a test sample (ID and ground truth)"""
         tid, is_cat = random.choice(self.test_database)
         return tid, is_cat
 
     def _encode_test(self, test_id: str, special: bool):
+        """Encode a test sample with or without special marker"""
         if special:
             # Add special marker to detect if miners understand this marker
             payload = f"SPECIAL:TEST:{test_id}:{self._special_mark}"
@@ -298,9 +302,35 @@ class Validator(BaseValidatorNeuron):
             synapse.audio_data = base64.b64encode(b"ERROR").decode("utf-8")
             return synapse
 
+    def check_chain_connection(self):
+        """Check connection to the Bittensor chain and reconnect if needed"""
+        try:
+            # Check subtensor connection
+            is_connected = self.subtensor.is_connected()
+            if not is_connected:
+                bt.logging.warning("Not connected to subtensor, attempting reconnection")
+                self.subtensor.connect()
+                is_connected = self.subtensor.is_connected()
+                
+            if is_connected:
+                bt.logging.info("Successfully connected to subtensor")
+                return True
+            else:
+                bt.logging.error("Failed to connect to subtensor")
+                return False
+        except Exception as e:
+            bt.logging.error(f"Error checking chain connection: {str(e)}")
+            return False
+
     async def run_step(self):
         """Standard run step, ensuring proper metagraph synchronization"""
         try:
+            # Check chain connection first
+            if not self.check_chain_connection():
+                bt.logging.warning("Chain connection check failed, retrying in 30 seconds")
+                await asyncio.sleep(30)
+                return
+            
             # Ensure subtensor is correctly initialized
             if self.subtensor is None:
                 self.subtensor = bt.subtensor(network=self.config.netuid.network)
@@ -326,6 +356,7 @@ class Validator(BaseValidatorNeuron):
                 bt.logging.error(f"Metagraph sync failed: {e}")
                 # Wait and continue rather than exiting directly if sync fails
                 await asyncio.sleep(10)
+                return
                 
             # Ensure weights are set
             current_time = time.time()
@@ -398,6 +429,11 @@ class Validator(BaseValidatorNeuron):
         inactive_mask = ~active
         self.scores[inactive_mask] = 0.0
         
+        # Set scores for known validators to 0
+        for validator_uid in self.known_validators:
+            if validator_uid < len(self.scores):
+                self.scores[validator_uid] = 0.0
+        
         # Log score statistics
         num_zeros = np.sum(self.scores == 0.0)
         num_ones = np.sum(self.scores == 1.0)
@@ -407,7 +443,7 @@ class Validator(BaseValidatorNeuron):
         bt.logging.info(f"Score statistics: zeros={num_zeros}, ones={num_ones}, active nodes={num_active}, scored nodes={num_scored}")
 
     async def query_miners(self):
-        """Query a batch of random miners"""
+        """Query a batch of random miners, excluding known validators"""
         try:
             # Determine query count
             n = min(self.config.neuron.sample_size, self.metagraph.n)
@@ -431,15 +467,28 @@ class Validator(BaseValidatorNeuron):
                 bt.logging.warning("No active miners")
                 return
                 
+            # Filter out known validators
+            potential_miners = [uid for uid in active_indices if uid not in self.known_validators]
+            if not potential_miners:
+                bt.logging.warning("No potential miners after filtering out validators")
+                return
+                
             # Randomly select miners
-            selected_uids = random.sample(active_indices, min(n, len(active_indices)))
-            bt.logging.info(f"Selected {len(selected_uids)} miners for this round")
+            selected_uids = random.sample(potential_miners, min(n, len(potential_miners)))
+            bt.logging.info(f"Selected {len(selected_uids)} miners for this round from {len(potential_miners)} potential miners")
             
             # Create query tasks
             tasks = []
             for uid in selected_uids:
                 synapse = await self.create_synapse()
                 axon = self.metagraph.axons[uid]
+                
+                # Skip invalid axons
+                if not axon or not axon.ip or axon.ip == "0.0.0.0":
+                    bt.logging.warning(f"Skipping UID={uid} with invalid axon: {axon}")
+                    if uid < len(self.scores):
+                        self.scores[uid] = 0.0  # Set score to 0 for invalid axon
+                    continue
                 
                 # Log the miner that will be queried
                 bt.logging.info(f"Preparing to query UID={uid}: ip={axon.ip}, port={axon.port}, hotkey={axon.hotkey[:10] if axon.hotkey else 'None'}...")
@@ -528,19 +577,19 @@ class Validator(BaseValidatorNeuron):
             else:
                 bt.logging.warning(f"UID={uid} invalid response format")
                 if uid < len(self.scores):
-                    self.scores[uid] = 0.0
+                    self.scores[uid] = 0.0  # Set score to 0 for invalid response format
             
         except asyncio.TimeoutError:
             bt.logging.warning(f"UID={uid} query timeout")
             if uid < len(self.scores):
-                self.scores[uid] = 0.0
+                self.scores[uid] = 0.0  # Set score to 0 for timeout
         except Exception as e:
             bt.logging.error(f"UID={uid} query error: {e}, axon={axon}")
             if uid < len(self.scores):
-                self.scores[uid] = 0.0
+                self.scores[uid] = 0.0  # Set score to 0 for any error
 
     def set_weights(self):
-        """Sets weights on chain using standard methods."""
+        """Sets weights on chain, with explicit fallback for empty scores"""
         try:
             # Ensure scores are valid before setting weights
             self._ensure_scores_are_valid()
@@ -549,14 +598,27 @@ class Validator(BaseValidatorNeuron):
             nonzero_count = np.sum(self.scores > 0)
             bt.logging.info(f"Setting weights: {nonzero_count} non-zero weights out of {len(self.scores)}")
             
+            # Check if all weights are zero
+            if nonzero_count == 0:
+                bt.logging.warning("No non-zero weights found. All miners will receive 0 weight.")
+                # Proceed with zero weights - ensures all miners get 0 rather than equal weights
+            
             # Standard bittensor weights setting with retries
             try:
-                # Try normalized weights for robustness
+                # Try normalized weights for robustness - only if we have non-zero weights
+                weights = self.scores
+                if nonzero_count > 0:
+                    # Normalize only if there are non-zero weights
+                    norm = np.sum(weights)
+                    if norm > 0:
+                        weights = weights / norm
+                        bt.logging.info(f"Normalized weights: min={weights.min()}, max={weights.max()}, sum={weights.sum()}")
+                
                 success = self.subtensor.set_weights(
                     netuid=self.config.netuid,
                     wallet=self.wallet,
                     uids=self.metagraph.uids,
-                    weights=self.scores,
+                    weights=weights,
                     wait_for_inclusion=False,
                     version_key=getattr(self, 'spec_version', None)
                 )
