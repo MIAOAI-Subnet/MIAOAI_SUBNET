@@ -1,87 +1,110 @@
 <div align="center">
 
-# **MIAOAI** <!-- omit in toc -->
-![hero](./asset/offline.jpg)
-### Bridging Pet Tech and Blockchain Innovation <!-- omit in toc -->
-
-
+# **MIAOAI** ![Subnet 86](https://img.shields.io/badge/Subnet-86_%E1%9A%B3-red)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/MIAOAI-Subnet/MIAOAI_SUBNET)
 
 </div>
 
-#  Introduction
+![logo](./assets/logo.png)
 
-MIAOAI is an animals Sound Recognition AI subnet dedicated to creating and interacting with audio content, fostering a playful and entertaining decentralized community.
+MIAOAI is a high-performance AI subnet built on the Bittensor network, designed for decentralized processing and validation of AI tasks. It features a dual-layer architecture of validators and miners, leveraging intelligent task scheduling and dynamic scoring to form an efficient and trustworthy distributed AI inference network.
 
-# Overview
-MIAOAI's future ability to generate and manipulate animal vocalizations for interactive and entertainment purposes.
+In MIAOAI:
 
-# Key Features
+Validators are responsible for receiving and dispatching diverse AI tasks—such as e-commerce customer service, text classification, and scene understanding—and for evaluating miner performance in real time. Based on performance, validators dynamically adjust miner weights and rewards.
 
-- Animals Sound Recognition
--	Future Meme Audio Creation: Transform user-uploaded audio (e.g., songs, speech) into animal-themed versions using style transfer, perfect for sharing on platforms like X and Instagram.
+Miners deploy and run AI models to process tasks assigned by validators. They earn token-based incentives according to the quality and correctness of their outputs.
 
-# Model Performance Comparison
+A hybrid scoring mechanism, combining trust-based evaluation with stake-weighted distribution, ensures secure and accurate task allocation across the network.
 
-MIAOAI's audio generation and interaction system is built on advanced audio synthesis and processing techniques:
--	WaveNet: A generative model for producing realistic animal vocalizations, trained on a diverse dataset of animal sounds to capture nuances like pitch and tone.
--	Audio Style Transfer with GANs: Uses Generative Adversarial Networks to transform user audio into animal-like sounds, preserving the rhythm while infusing feline characteristics.
--	Emotion-Driven Synthesis: Incorporates a lightweight emotion encoder to adjust generated sounds based on user-selected moods (e.g., happy, curious, sleepy).
+By establishing a closed loop for task handling and model evaluation, MIAOAI significantly improves the scalability and reliability of decentralized AI systems, injecting robust computational power into the Bittensor subnet ecosystem.
+- [Incentive Design](#incentive-design)
+- [Requirements](#requirements)
+  - [Miner Requirements](#miner-requirements)
+  - [Validator Requirements](#validator-requirements)
+- [Installation](#installation)
+  - [Common Setup](#common-setup)
+  - [Miner Specific Setup](#miner-specific-setup)
+  - [Validator Specific Setup](#validator-specific-setup)
+- [Get Involved](#get-involved)
+---
 
-<img width="416" alt="image" src="https://github.com/user-attachments/assets/a25d4cc0-bbca-4f74-b587-852a706e800e">
+# Incentive Design
+MIAOAI’s incentive mechanism is designed to foster positive collaboration between miners and validators through task-driven performance, building a stable and efficient decentralized AI inference network.
 
-# Miner and Validator Functionality
+Task-driven reward distribution: Validators assign real AI inference tasks (such as intelligent Q&A, image recognition, etc.) and evaluate the results submitted by miners based on accuracy and response time to generate a task quality score.
 
-# Overview
-- ⚖️ [Validator](./docs/validator.md)
-- ⛏️ [Miner](./docs/miner.md)
+Dynamic weight and reward calculation: A miner’s task score affects their weight within each validator pool. The system dynamically calculates reward allocation based on multiple factors, including task performance, stake amount, and historical reputation.
 
-This tutorial shows how to  run incentives on it using the our testnet.
-**important**.
-- Do not expose your private key.
-- Use only your testnet wallet.
-- Do not reuse your mainnet wallet password.
-- Make sure your incentives are resistant to abuse.
+Dual scoring with trust and stake: MIAOAI combines a miner’s historical stability (trust score) and the amount of staked tokens (stake weight) to determine task assignment priority and final reward. This dual mechanism helps prevent manipulation by malicious nodes.
 
-## Preparation
-#### prepare subnet
-```bash
-git clone https://github.com/MIAOAI-Subnet/MIAOAI_SUBNET
-python3 -m venv btcli_venv
-source btcli_venv/bin/activate
+# Requirements
 
-# setup bittensor sdk
-pip install bittensor
-pip install -e .
-```
-##  1.running MIAO-recognition
-```bash
- git clone https://github.com/MIAOAI-Subnet/MIAO-recognition
+## Miner Requirements
+To run a MIAOAI miner, you will need:
+- A Bittensor wallet
+- Bittensor mining hardware ( GPUs, etc.) 
+- A running Redis server for data persistence
+- Python 3.10 or higher
 
- cd MIAO-recognition
+## Validator Requirements
+To run a MIAOAI validator, you will need:
+- A Bittensor wallet
+- A running Redis server for data persistence
+- Python 3.10 or higher environment
 
- python -m venv venv
- source venv/bin/activate
- pip install -r requirements.txt
- python app.py 
-```
+# Installation
 
-### start miner
-```bash
-python neurons/miner.py --netuid 86  --wallet.name miner --wallet.hotkey miner --logging.debug
-```
+## Common Setup
+These steps apply to both miners and validators:
 
-### start validator
-```bash
-python neurons/validator.py --netuid 86  --wallet.name validator1 --wallet.hotkey validator1 --logging.debug 
-```
-### check state
-```bash
-btcli wallet overview --wallet.name miner --netuid 86
-btcli wallet overview --wallet.name validator --netuid 86 
-```
+1.  **Clone the repository:**
+    ```bash
+    git clone [https://github.com/MIAOAI-Subnet/MIAOAI_SUBNET.git](https://github.com/MIAOAI-Subnet/MIAOAI_SUBNET.git)
+    cd MIAOAI_SUBNET
+    ```
 
-# Notice
-The model always stays on your machine and is yours!
-The data provided by our community friends and the benefits and efficiency brought by running in the subnet will better help us train the animal-sound model
+2.  **Set up and activate a Python virtual environment:**
+    ```bash
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
 
+3.  **Upgrade pip:**
+    ```bash
+    pip install --upgrade pip
+    ```
+
+4.  **Install the MIAOAI package:**
+    ```bash
+    pip install -e .
+    ```
+
+## Miner Specific Setup
+After completing the common setup, follow the detailed steps in the Miner Guide:
+
+* [Install Redis](docs/running_miner#2-install-redis)
+* [Configure your miner (`.env` file or command-line arguments)](docs/running_miner#5-configuration)
+* [Run the miner (using PM2 recommended)](docs/running_miner#6-running-the-miner)
+
+For the complete, step-by-step instructions for setting up and running your miner, please refer to the [MIAOAI Miner Setup Guide](docs/running_miner).
+
+## Validator Specific Setup
+After completing the common setup, follow the detailed steps in the Validator Guide:
+
+* [Configure your validator (`.env` file or command-line arguments)](docs/running_validator#4-configuration-methods)
+* [Run the validator (using PM2 recommended)](docs/running_validator#5-running-the-validator)
+
+For the complete, step-by-step instructions for setting up and running your validator, please refer to the [MIAOAI Validator Setup](docs/running_validator).
+
+# Get Involved
+
+- Join the discussion on the [Bittensor Discord](https://discord.com/invite/bittensor) in the Subnet 86 channels.
+- Check out the [Bittensor Documentation](https://docs.bittensor.com/) for general information about running subnets and nodes.
+- Contributions are welcome! See the repository's contribution guidelines for details.
+
+---
+**Full Guides:**
+- [MIAOAI Miner Setup Guide ](docs/running_miner.md)
+- [MIAOAI Validator Setup ](docs/running_validator.md) 
