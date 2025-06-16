@@ -41,7 +41,7 @@ class TaskManager:
                 return self.file_task_counts[file_path]
                 
             count = 0
-            with open(file_path, 'rb') as f:
+            with open(file_path, 'rb', encoding="utf-8") as f:
                 parser = ijson.parse(f)
                 for prefix, event, value in parser:
                     if prefix.endswith('.task_id'):
@@ -96,7 +96,7 @@ class TaskManager:
             tasks_loaded = 0
             skipped_tasks = 0
             
-            with open(file_path, 'rb') as f:
+            with open(file_path, 'rb', encoding="utf-8") as f:
                 parser = ijson.items(f, 'item')
                 
                 for task in parser:
