@@ -128,7 +128,7 @@ class MiaoAIValidator(BaseValidator):
         return 1.0  # 目前
 
     def allocate_tasks(self) -> List[TaskAllocation]:
-        check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "true").lower() == "true"
+        check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
         if check_max_blocks and self.total_blocks_run >= MAX_VALIDATOR_BLOCKS:
             self.current_allocations = []
             return []
@@ -575,7 +575,7 @@ class MiaoAIValidator(BaseValidator):
 
     def set_weights(self) -> Tuple[bool, str]:
         try:
-            check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "true").lower() == "true"
+            check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
             if check_max_blocks and self.total_blocks_run >= MAX_VALIDATOR_BLOCKS:
                 return True, ""
             miner_indices = []
@@ -761,7 +761,7 @@ class MiaoAIValidator(BaseValidator):
             logging.set_trace(False)
             logging.setLevel(log_level)
 
-        check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "true").lower() == "true"
+        check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
 
 
 if __name__ == "__main__":

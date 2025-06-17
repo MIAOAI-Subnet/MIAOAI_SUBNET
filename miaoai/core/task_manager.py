@@ -59,7 +59,7 @@ class TaskManager:
                 logging.warning(f"Task data path not found: {self.task_data_path}")
                 return
                 
-            check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "true").lower() == "true"
+            check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
             
             self.task_pool.clear()
             self.reset_all_assignments()
@@ -176,7 +176,7 @@ class TaskManager:
 
     def get_task_for_miner(self, miner_hotkey: str, validator_hotkey: str) -> Optional[TaskData]:
         try:
-            check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "true").lower() == "true"
+            check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
             if check_max_blocks and self.total_blocks_run >= MAX_VALIDATOR_BLOCKS:
                 return None
             
