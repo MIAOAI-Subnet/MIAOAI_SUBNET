@@ -189,6 +189,7 @@ class MiaoAIValidator(BaseValidator):
                 return 0.0, 0.0
             
             is_valid = False
+            logging.info(f"process_sentiment_request signature {signature}, timestamp :{timestamp} ")
             if signature is not None and timestamp != 0:
                 is_valid = True
 
@@ -491,6 +492,7 @@ class MiaoAIValidator(BaseValidator):
         self.ensure_validator_permit()
         
         self.allocate_tasks()
+
         next_sync_block = self.current_block + self.eval_interval
 
         try:
@@ -612,6 +614,10 @@ class MiaoAIValidator(BaseValidator):
                 is_validator = False
                 try:
                     neuron = neurons[idx]
+                    ip = neuron.axon_info.ip
+                    if ip == '0.0.0.0':
+                        continue
+
                     is_validator = validator_trust[idx] > 0
                     is_active = bool(neuron.active)
                     stake = float(neuron.stake)
@@ -628,7 +634,7 @@ class MiaoAIValidator(BaseValidator):
 
                 historical_score = self.scoring_system.get_historical_score(hotkey)
                 current_quality_score = self.scoring_system.get_current_cycle_score(hotkey)
-                # logging.info(f"set_weights hotkey: {hotkey},  current_quality_score: {current_quality_score}")
+                logging.info(f"set_weights hotkey: {hotkey},  current_quality_score: {current_quality_score}")
                 stake_weight = (stake / total_stake) * 0.2 if total_stake > 0 else 0
 
                 final_score = (
