@@ -185,3 +185,4 @@ cognify/miner/proxy/braiins_farm/config/
 /Dockerfile-validator
 /miaoai/tests/wallet_deployment_manager.py
 /tasks/ecommerce_tasks.json
+/tests/
