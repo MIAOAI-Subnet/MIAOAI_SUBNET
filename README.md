@@ -126,19 +126,19 @@ These steps apply to both miners and validators:
 ## Miner Specific Setup
 After completing the common setup, follow the detailed steps in the Miner Guide:
 
-* [Install Redis](docs/running_miner#2-install-redis)
-* [Configure your miner (`.env` file or command-line arguments)](docs/running_miner#5-configuration)
-* [Run the miner (using PM2 recommended)](docs/running_miner#6-running-the-miner)
+* [Install Redis](docs/running_miner.md#2-install-redis)
+* [Configure your miner (`.env` file or command-line arguments)](docs/running_miner.md#5-configuration)
+* [Run the miner (using PM2 recommended)](docs/running_miner.md#6-running-the-miner)
 
-For the complete, step-by-step instructions for setting up and running your miner, please refer to the [MIAOAI Miner Setup Guide](docs/running_miner).
+For the complete, step-by-step instructions for setting up and running your miner, please refer to the [MIAOAI Miner Setup Guide](docs/running_miner.md).
 
 ## Validator Specific Setup
 After completing the common setup, follow the detailed steps in the Validator Guide:
 
-* [Configure your validator (`.env` file or command-line arguments)](docs/running_validator#4-configuration-methods)
-* [Run the validator (using PM2 recommended)](docs/running_validator#5-running-the-validator)
+* [Configure your validator (`.env` file or command-line arguments)](docs/running_validator.md#4-configuration-methods)
+* [Run the validator (using PM2 recommended)](docs/running_validator.md#5-running-the-validator)
 
-For the complete, step-by-step instructions for setting up and running your validator, please refer to the [MIAOAI Validator Setup](docs/running_validator).
+For the complete, step-by-step instructions for setting up and running your validator, please refer to the [MIAOAI Validator Setup](docs/running_validator.md).
 
 # Get Involved
 
