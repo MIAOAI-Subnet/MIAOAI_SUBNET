@@ -18,6 +18,7 @@ from miaoai.core.validator_manager import ValidatorManager
 from miaoai.core.task_type import TaskType
 from miaoai.core.task_synapse import TaskSynapse
 from miaoai.core.hardware_check import HardwareChecker
+from miaoai.core.validator_whitelist import ValidatorWhitelistManager
 
 class MiaoAIMiner(BaseMiner):
 
@@ -54,6 +55,8 @@ class MiaoAIMiner(BaseMiner):
             "total_blocks_completed": 0,
             "current_blocks_allocated": 0
         }
+
+        self.whitelist_manager = ValidatorWhitelistManager()
         
 
     def check_requirements(self):
@@ -406,7 +409,12 @@ class MiaoAIMiner(BaseMiner):
                         
                     if not bool(neuron.active):
                         continue
-                        
+
+                    validator_hotkey = self.metagraph.hotkeys[idx]
+                    if self.whitelist_manager.is_validator_blacklisted(validator_hotkey):
+                        logging.debug(f"Skipping blacklisted validator: {validator_hotkey}")
+                        continue
+
                     normalized_trust = trust / U16_MAX
                     validators.append((idx, normalized_trust, stake))
                     

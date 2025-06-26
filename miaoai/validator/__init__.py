@@ -36,6 +36,7 @@ class BaseValidator:
         self.metagraph_info = None
         self.tempo = None
         self.uid = None
+        self.validator_hotkey = None
         self.weights_interval = None
 
         self.eval_interval = self.config.eval_interval
@@ -197,6 +198,7 @@ class BaseValidator:
             exit()
         else:
             self.uid = self.metagraph.hotkeys.index(self.wallet.hotkey.ss58_address)
+            self.validator_hotkey = self.wallet.hotkey.ss58_address
 
         self.current_block = self.metagraph.block
         self.hotkeys = self.metagraph.hotkeys

@@ -241,7 +241,7 @@ class ValidatorManager:
             miner_history.update(synapse.miner_history)
             self.storage.set(f"miner_history_{miner_uid}", miner_history)
             
-        enable_recent_failures = os.getenv("ENABLE_RECENT_FAILURES", "true").lower() == "true"
+        enable_recent_failures = os.getenv("ENABLE_RECENT_FAILURES", "false").lower() == "true"
         recent_failures = miner_history.get("recent_failures", 0)
         if enable_recent_failures and  recent_failures >= 10:  # 如果最近连续失败10次
             logging.warning(f"Miner {miner_uid} has too many recent failures: {recent_failures}")
