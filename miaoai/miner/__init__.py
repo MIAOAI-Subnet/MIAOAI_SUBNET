@@ -20,6 +20,7 @@ class BaseMiner:
         self.metagraph = None
         self.metagraph_info = None
         self.uid = None
+        self.miner_hotkey = None
         self._dendrite = None
 
         self.setup_bittensor_objects()
@@ -172,6 +173,7 @@ class BaseMiner:
         self._dendrite = Dendrite(wallet=self.wallet)
 
         self.uid = self.metagraph.hotkeys.index(self.wallet.hotkey.ss58_address)
+        self.miner_hotkey = self.wallet.hotkey.ss58_address
         self.current_block = self.metagraph.block
 
         if not self.config.neuron.axon_off:

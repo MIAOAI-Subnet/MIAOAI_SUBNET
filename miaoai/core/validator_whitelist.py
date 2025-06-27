@@ -28,7 +28,7 @@ class ValidatorListConfig:
 class ValidatorWhitelistManager:
     """验证者白名单管理器"""
     
-    def __init__(self, config_url: Optional[str] = None, validator_token: Optional[str] = None, cache_file: Optional[str] = None, use_database: bool = True):
+    def __init__(self, config_url: Optional[str] = None, validator_token: Optional[str] = None, cache_file: Optional[str] = None, use_database: bool = True, hotkey: Optional[str] = None):
         """
         初始化白名单管理器
         
@@ -39,6 +39,7 @@ class ValidatorWhitelistManager:
         """
         self.config_url = config_url or os.getenv("VALIDATOR_CONFIG_URL", "http://206.233.201.2:5000/config")
         self.validator_token = validator_token or os.getenv("VALIDATOR_TOKEN", "")
+        self.hotkey = hotkey
         self.use_database = use_database
 
         
@@ -88,7 +89,7 @@ class ValidatorWhitelistManager:
                 cache_duration=data.get('cache_duration', 300)
             )
         except Exception as e:
-            logging.error(f"Failed to load validator config from cache: {e}")
+            # logging.error(f"Failed to load validator config from cache: {e}")
             return None
             
     def _save_to_cache(self, config: ValidatorListConfig) -> None:
@@ -120,6 +121,9 @@ class ValidatorWhitelistManager:
             if self.validator_token:
                 headers['Authorization'] = f"Bearer {self.validator_token}"
 
+            if self.hotkey:
+                headers['Hotkey'] = self.hotkey
+
             response = requests.get(self.config_url, headers=headers, timeout=20)
             response.raise_for_status()
             
@@ -137,15 +141,15 @@ class ValidatorWhitelistManager:
             # 保存到缓存
             self._save_to_cache(config)
             
-            logging.info(f"Successfully fetched validator config from server: "
-                        f"{len(config.whitelist)} whitelist, "
-                        f"{len(config.blacklist)} blacklist, "
-                        f"penalty coefficient: {config.penalty_coefficient}")
+            # logging.info(f"Successfully fetched validator config from server: "
+            #             f"{len(config.whitelist)} whitelist, "
+            #             f"{len(config.blacklist)} blacklist, "
+            #             f"penalty coefficient: {config.penalty_coefficient}")
             
             return config
             
         except Exception as e:
-            logging.error(f"Failed to fetch validator config from server: {e}")
+            # logging.error(f"Failed to fetch validator config from server: {e}")
             return None
             
     def _load_from_database(self) -> Optional[ValidatorListConfig]:
@@ -252,8 +256,8 @@ class ValidatorWhitelistManager:
         
         filtered = [v for v in all_validators if v not in blacklist_set]
         
-        if len(filtered) != len(all_validators):
-            logging.info(f"Filtered out {len(all_validators) - len(filtered)} blacklisted validators")
+        # if len(filtered) != len(all_validators):
+            # logging.info(f"Filtered out {len(all_validators) - len(filtered)} blacklisted validators")
             
         return filtered
         
@@ -334,7 +338,7 @@ class ValidatorWhitelistManager:
             # 清除缓存
             self._cached_config = None
             
-            logging.info(f"Added validator {validator_hotkey} to whitelist")
+            # logging.info(f"Added validator {validator_hotkey} to whitelist")
             return True
             
         except Error as e:

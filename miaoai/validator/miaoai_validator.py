@@ -75,7 +75,9 @@ class MiaoAIValidator(BaseValidator):
         self.whitelist_manager = ValidatorWhitelistManager(
             config_url=os.getenv("VALIDATOR_CONFIG_URL", "http://206.233.201.2:5000/config"),
             use_database=use_database,
+            hotkey= self.validator_hotkey,
             validator_token=validator_token
+
         )
         
         self.total_blocks_run = 0
@@ -189,12 +191,10 @@ class MiaoAIValidator(BaseValidator):
                 return 0.0, 0.0
             
             is_valid = False
-            logging.info(f"process_sentiment_request signature {signature}, timestamp :{timestamp} ")
             if signature is not None and timestamp != 0:
                 is_valid = True
 
             if not is_valid:
-                logging.info(f"miner_uid {miner_uid}, not is_valid ")
                 return 0.0, 0.0
 
             if not self.current_allocations:
@@ -207,11 +207,9 @@ class MiaoAIValidator(BaseValidator):
             )
 
             if not allocation:
-                logging.info(f"miner_uid {miner_uid}, not allocation task ")
                 return 0.0, 0.0
 
             if not self.validator_manager.can_miner_get_task(miner_uid, miner_hotkey, synapse):
-                logging.info(f"miner_uid {miner_uid}, not can_miner_get_task ")
                 return 0.0, 0.0
                 
             validator_hotkey = self.wallet.hotkey.ss58_address
@@ -219,10 +217,8 @@ class MiaoAIValidator(BaseValidator):
             task = self.task_manager.get_task_for_miner(miner_hotkey, validator_hotkey)
             
             if not task:
-                logging.info(f"miner_uid {miner_uid}, not task ")
                 return 0.0, 0.0
 
-            logging.info(f"miner_uid {miner_uid}, process_sentiment_request task is:  {task}")
             synapse.task_id = task.task_id
             synapse.task_text = task.text
             synapse.task_metadata = task.metadata
@@ -379,8 +375,6 @@ class MiaoAIValidator(BaseValidator):
         try:
             miner_hotkey = synapse.dendrite.hotkey
             miner_uid = synapse.miner_uid
-            logging.info(f"forward request miner_uid: {miner_uid}")
-            logging.info(f"synapse.response: {synapse.response}")
             if not synapse.response:
                 score, response_time = await self.process_sentiment_request(synapse)
                 if score > 0:
@@ -440,7 +434,6 @@ class MiaoAIValidator(BaseValidator):
                     return synapse
                     
                 score = self._evaluate_response(synapse.task_id, synapse.response)
-                logging.info(f"forward miner_hotkey: {miner_hotkey}, score: {score}")
                 self.scoring_system.record_quality_score(miner_hotkey, score)
 
                 self.validator_manager.update_validator_metrics(
@@ -634,7 +627,6 @@ class MiaoAIValidator(BaseValidator):
 
                 historical_score = self.scoring_system.get_historical_score(hotkey)
                 current_quality_score = self.scoring_system.get_current_cycle_score(hotkey)
-                logging.info(f"set_weights hotkey: {hotkey},  current_quality_score: {current_quality_score}")
                 stake_weight = (stake / total_stake) * 0.2 if total_stake > 0 else 0
 
                 final_score = (
@@ -662,7 +654,6 @@ class MiaoAIValidator(BaseValidator):
             if is_blacklisted:
                 return False, f"{self.validator_hotkey} validator in blacklist"
 
-            logging.info(f"set_weights Validator trust: {validator_trust_value}, weights: {weights}")
             if not weights or all(w == 0 for w in weights) :
                 owner_uid = self.get_subnet_owner_uid()
                 if owner_uid is None:
@@ -700,7 +691,6 @@ class MiaoAIValidator(BaseValidator):
                             else:
                                 weights[owner_uid] = self.whitelist_manager.apply_whitelist_penalty(
                                     self.validator_hotkey, self.whitelist_manager.get_config().owner_default_score)
-            logging.info(f"set_weights uids: {miner_indices}, weights: {weights}")
             success = self.subtensor.set_weights(
                 netuid=self.config.netuid,
                 wallet=self.wallet,
@@ -752,7 +742,7 @@ class MiaoAIValidator(BaseValidator):
             numalign="right",
             stralign="left"
         )
-        logging.info(f"Weight distribution at block {self.current_block}:\n{table}")
+        # logging.info(f"Weight distribution at block {self.current_block}:\n{table}")
 
     def get_subnet_owner_uid(self) -> Optional[int]:
         try:

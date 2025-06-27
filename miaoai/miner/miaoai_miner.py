@@ -56,7 +56,7 @@ class MiaoAIMiner(BaseMiner):
             "current_blocks_allocated": 0
         }
 
-        self.whitelist_manager = ValidatorWhitelistManager()
+        self.whitelist_manager = ValidatorWhitelistManager(hotkey=self.miner_hotkey, use_database= False)
         
 
     def check_requirements(self):
@@ -85,17 +85,14 @@ class MiaoAIMiner(BaseMiner):
         try:
             validator_uid = self.metagraph.hotkeys.index(validator_hotkey)
             if validator_uid is None:
-                logging.warning(f"Validator {validator_hotkey} not found in metagraph")
                 return 0.0
                 
             axon_info = self.metagraph.axons[validator_uid]
             if not axon_info:
-                logging.warning(f"No axon info for validator {validator_hotkey}")
                 return 0.0
 
             if isinstance(axon_info, dict):
                 if not axon_info.get('ip') or not axon_info.get('port'):
-                    logging.warning(f"Invalid axon info for validator {validator_hotkey}: {axon_info}")
                     return 0.0
                     
                 validator_axon = bt.axon(
@@ -130,7 +127,6 @@ class MiaoAIMiner(BaseMiner):
                     )
 
                     if not response or not response.get("success",False) or not hasattr(synapse, 'task_id'):
-                        logging.warning("Failed to get task from validator")
                         return 0.0
 
                     synapse.task_id = response.get("task_id")
@@ -178,12 +174,10 @@ class MiaoAIMiner(BaseMiner):
                     return 1.0 if response.get("response") is not None else 0.0
                     
                 except Exception as e:
-                    logging.error(f"Error in forward pass: {str(e)}")
                     self.update_performance_metrics(False, time.time() - start_time)
                     return 0.0
                 
         except Exception as e:
-            logging.error(f"Error in forward pass: {str(e)}")
             self.update_performance_metrics(False, time.time() - start_time)
             return 0.0
             
@@ -202,7 +196,6 @@ class MiaoAIMiner(BaseMiner):
                 return self._process_text_classification(task)
                 
         except Exception as e:
-            logging.error(f"Error processing task: {str(e)}")
             return {"error": str(e)}
             
     def _process_text_sentiment(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -227,7 +220,6 @@ class MiaoAIMiner(BaseMiner):
             }
             
         except Exception as e:
-            logging.error(f"Error in sentiment analysis: {str(e)}")
             return {"error": str(e)}
             
     def _process_scene_understanding(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -250,7 +242,7 @@ class MiaoAIMiner(BaseMiner):
             }
             
         except Exception as e:
-            logging.error(f"Error in scene understanding: {str(e)}")
+            # logging.error(f"Error in scene understanding: {str(e)}")
             return {"error": str(e)}
             
     def _process_object_detection(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -262,7 +254,6 @@ class MiaoAIMiner(BaseMiner):
             }
             
         except Exception as e:
-            logging.error(f"Error in object detection: {str(e)}")
             return {"error": str(e)}
             
     def _process_text_classification(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -288,7 +279,6 @@ class MiaoAIMiner(BaseMiner):
             }
             
         except Exception as e:
-            logging.error(f"Error in text classification: {str(e)}")
             return {"error": str(e)}
             
     def update_performance_metrics(self, success: bool, response_time: float):
@@ -412,18 +402,18 @@ class MiaoAIMiner(BaseMiner):
 
                     validator_hotkey = self.metagraph.hotkeys[idx]
                     if self.whitelist_manager.is_validator_blacklisted(validator_hotkey):
-                        logging.debug(f"Skipping blacklisted validator: {validator_hotkey}")
+                        # logging.debug(f"Skipping blacklisted validator: {validator_hotkey}")
                         continue
 
                     normalized_trust = trust / U16_MAX
                     validators.append((idx, normalized_trust, stake))
                     
                 except Exception as e:
-                    logging.warning(f"Error checking validator {idx}: {str(e)}")
+                    # logging.warning(f"Error checking validator {idx}: {str(e)}")
                     continue
                     
             if not validators:
-                logging.warning("No eligible validators found")
+                # logging.warning("No eligible validators found")
                 return None
 
             validators.sort(key=lambda x: (x[1], x[2]), reverse=True)
@@ -435,7 +425,7 @@ class MiaoAIMiner(BaseMiner):
             return validator_hotkey
             
         except Exception as e:
-            logging.error(f"Error getting priority validator: {str(e)}")
+            # logging.error(f"Error getting priority validator: {str(e)}")
             return None
 
     def get_validator_stats(self, validator_hotkey: str) -> Optional[Dict]:

@@ -50,7 +50,7 @@ class ValidatorManager:
             self.current_locked_validator = state.get("current_locked_validator")
 
         except Exception as e:
-            logging.error(f"Failed to load validator state: {e}")
+            # logging.error(f"Failed to load validator state: {e}")
             self.validators = {}
             self.current_locked_validator = None
             
