@@ -1,5 +1,5 @@
-# MIAOAI Miner Setup Guide
-This guide will walk you through the process of deploying and running a MIAOAI miner node, enabling you to connect your local computing power to the Bittensor network and support validators in decentralized AI task processing.
+# Miaoai Miner Setup Guide
+This guide will walk you through the process of deploying and running a Miaoai miner node, enabling you to connect your local computing power to the Bittensor network and support validators in decentralized AI task processing.
 
 * [Overview](#overview)
 * [Prerequisites](#prerequisites)
