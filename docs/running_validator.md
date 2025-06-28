@@ -1,4 +1,4 @@
-# Miaoai Validator Setup
+# MIAOAI Validator Setup
 
 - [miaoai Validator Setup ](#miaoai-validator-setup)
   - [Prerequisites](#prerequisites)
