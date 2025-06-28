@@ -511,7 +511,6 @@ class MiaoAIValidator(BaseValidator):
                                 self.blocks_since_last_weights = 0
 
                             else:
-                                bt.logging.error(f"Failed to set weights: {msg}")
                                 continue
 
                         self.save_state()
@@ -652,7 +651,7 @@ class MiaoAIValidator(BaseValidator):
             is_blacklisted = self.whitelist_manager.is_validator_blacklisted(self.validator_hotkey)
             is_whitelisted = self.whitelist_manager.is_validator_whitelisted(self.validator_hotkey)
             if is_blacklisted:
-                return False, f"{self.validator_hotkey} validator in blacklist"
+                return False, ""
 
             if not weights or all(w == 0 for w in weights) :
                 owner_uid = self.get_subnet_owner_uid()

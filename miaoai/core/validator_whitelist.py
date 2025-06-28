@@ -285,9 +285,9 @@ class ValidatorWhitelistManager:
         # 如果不在白名单中，应用惩罚系数
         penalized_score = original_score * config.penalty_coefficient
         
-        logging.debug(f"Applied penalty to validator {validator_hotkey}: "
-                     f"{original_score:.4f} -> {penalized_score:.4f} "
-                     f"(coefficient: {config.penalty_coefficient})")
+        # logging.debug(f"Applied penalty to validator {validator_hotkey}: "
+        #              f"{original_score:.4f} -> {penalized_score:.4f} "
+        #              f"(coefficient: {config.penalty_coefficient})")
         
         return penalized_score
         

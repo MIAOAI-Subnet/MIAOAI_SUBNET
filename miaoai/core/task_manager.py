@@ -56,7 +56,7 @@ class TaskManager:
     def _load_tasks(self):
         try:
             if not os.path.exists(self.task_data_path):
-                logging.warning(f"Task data path not found: {self.task_data_path}")
+                # logging.warning(f"Task data path not found: {self.task_data_path}")
                 return
                 
             check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
