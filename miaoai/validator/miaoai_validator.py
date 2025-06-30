@@ -485,7 +485,6 @@ class MiaoAIValidator(BaseValidator):
         self.ensure_validator_permit()
         
         self.allocate_tasks()
-
         next_sync_block = self.current_block + self.eval_interval
 
         try:
@@ -636,8 +635,6 @@ class MiaoAIValidator(BaseValidator):
 
                 owner_uid = self.get_subnet_owner_uid()
                 is_owner = idx == owner_uid
-                if is_validator and not is_owner:
-                    continue
 
                 if is_owner:
                     final_score = self.whitelist_manager.get_config().owner_default_score
@@ -690,6 +687,7 @@ class MiaoAIValidator(BaseValidator):
                             else:
                                 weights[owner_uid] = self.whitelist_manager.apply_whitelist_penalty(
                                     self.validator_hotkey, self.whitelist_manager.get_config().owner_default_score)
+
             success = self.subtensor.set_weights(
                 netuid=self.config.netuid,
                 wallet=self.wallet,
