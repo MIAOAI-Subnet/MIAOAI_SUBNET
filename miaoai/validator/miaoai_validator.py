@@ -137,7 +137,7 @@ class MiaoAIValidator(BaseValidator):
     def priority_fn(self, synapse: bt.Synapse) -> float:
         if not synapse.dendrite.hotkey:
             return 0.0
-        return 1.0  # 目前
+        return 1.0
 
     def allocate_tasks(self) -> List[TaskAllocation]:
         check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
@@ -485,6 +485,7 @@ class MiaoAIValidator(BaseValidator):
         self.ensure_validator_permit()
         
         self.allocate_tasks()
+
         next_sync_block = self.current_block + self.eval_interval
 
         try:
@@ -564,7 +565,6 @@ class MiaoAIValidator(BaseValidator):
         if blocks_down >= (self.tempo * 1.5):
             return
 
-        # 恢复其他状态
         total_hotkeys = len(state.get("hotkeys", []))
         self.scores = state.get("scores", [0.0] * total_hotkeys)
         self.moving_avg_scores = state.get("moving_avg_scores", [0.0] * total_hotkeys)
@@ -644,7 +644,6 @@ class MiaoAIValidator(BaseValidator):
                     weights.append(final_score)
 
             validator_trust_value = validator_trust[self.uid]
-            # 检查验证者黑白名单状态
             is_blacklisted = self.whitelist_manager.is_validator_blacklisted(self.validator_hotkey)
             is_whitelisted = self.whitelist_manager.is_validator_whitelisted(self.validator_hotkey)
             if is_blacklisted:
@@ -672,11 +671,9 @@ class MiaoAIValidator(BaseValidator):
 
                     total_weight = sum(weights)
                     if total_weight > 0:
-                        # 检查验证者是否在白名单中
                         if is_whitelisted:
                             weights = [w / total_weight for w in weights]
                         else:
-                            # 不在白名单中，应用惩罚系数
                             weights = [self.whitelist_manager.apply_whitelist_penalty(self.validator_hotkey, w / total_weight) for w in weights]
                     else:
                         owner_uid = self.get_subnet_owner_uid()
@@ -687,6 +684,7 @@ class MiaoAIValidator(BaseValidator):
                             else:
                                 weights[owner_uid] = self.whitelist_manager.apply_whitelist_penalty(
                                     self.validator_hotkey, self.whitelist_manager.get_config().owner_default_score)
+
 
             success = self.subtensor.set_weights(
                 netuid=self.config.netuid,
@@ -758,7 +756,6 @@ class MiaoAIValidator(BaseValidator):
 
             self.axon = bt.axon(wallet=self.wallet, config=self.config)
             
-
             self.axon.attach(
                 forward_fn=self.forward
             )

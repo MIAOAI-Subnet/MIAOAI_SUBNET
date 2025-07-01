@@ -10,24 +10,12 @@ from bittensor import logging as bt_logging
 
 
 class DatabaseManager:
-    """数据库管理器"""
-    
-    def __init__(self, 
+    def __init__(self,
                  host: str = None,
                  port: int = None,
                  database: str = None,
                  username: str = None,
                  password: str = None):
-        """
-        初始化数据库管理器
-        
-        Args:
-            host: 数据库主机地址
-            port: 数据库端口
-            database: 数据库名称
-            username: 用户名
-            password: 密码
-        """
         self.host = host or os.getenv("DB_HOST", "localhost")
         self.port = port or int(os.getenv("DB_PORT", "3306"))
         self.database = database or os.getenv("DB_NAME", "cognify")
@@ -42,7 +30,6 @@ class DatabaseManager:
         self._init_pool()
         
     def _init_pool(self):
-        """初始化连接池"""
         try:
             config = {
                 'host': self.host,
@@ -67,7 +54,6 @@ class DatabaseManager:
             
     @contextmanager
     def get_connection(self):
-        """获取数据库连接的上下文管理器"""
         connection = None
         try:
             connection = self._pool.get_connection()
@@ -82,17 +68,7 @@ class DatabaseManager:
                 connection.close()
                 
     def execute_query(self, query: str, params: tuple = None, fetch: bool = False) -> Optional[List[tuple]]:
-        """
-        执行SQL查询
-        
-        Args:
-            query: SQL查询语句
-            params: 查询参数
-            fetch: 是否获取结果
-            
-        Returns:
-            查询结果（如果fetch=True）
-        """
+
         with self.get_connection() as connection:
             cursor = connection.cursor()
             try:
@@ -106,16 +82,7 @@ class DatabaseManager:
                 cursor.close()
                 
     def execute_many(self, query: str, params_list: List[tuple]) -> int:
-        """
-        批量执行SQL语句
-        
-        Args:
-            query: SQL查询语句
-            params_list: 参数列表
-            
-        Returns:
-            影响的行数
-        """
+
         with self.get_connection() as connection:
             cursor = connection.cursor()
             try:
@@ -126,7 +93,6 @@ class DatabaseManager:
                 cursor.close()
                 
     def create_tables(self):
-        """创建必要的数据库表"""
         tables = {
             'validator_tokens': '''
                 CREATE TABLE IF NOT EXISTS validator_tokens (
@@ -212,7 +178,6 @@ class DatabaseManager:
                 raise
                 
     def init_default_config(self):
-        """初始化默认配置"""
         default_configs = [
             ('penalty_coefficient', '0.000000001', 'number', 'Penalty coefficient for non-whitelisted validators'),
             ('cache_duration', '1200', 'number', 'Cache duration in seconds'),
@@ -236,7 +201,6 @@ class DatabaseManager:
                 bt_logging.error(f"Error initializing config {config_key}: {e}")
                 
     def get_config(self, config_key: str, default_value: Any = None) -> Any:
-        """获取配置值"""
         query = "SELECT config_value, data_type FROM system_config WHERE config_key = %s"
         result = self.execute_query(query, (config_key,), fetch=True)
         
@@ -245,7 +209,6 @@ class DatabaseManager:
             
         config_value, data_type = result[0]
         
-        # 根据数据类型转换值
         if data_type == 'number':
             try:
                 return float(config_value) if '.' in config_value else int(config_value)
@@ -263,7 +226,6 @@ class DatabaseManager:
             return config_value
             
     def set_config(self, config_key: str, config_value: Any, data_type: str = 'string', updated_by: str = 'system'):
-        """设置配置值"""
         if data_type == 'json':
             import json
             config_value = json.dumps(config_value)
@@ -282,7 +244,6 @@ class DatabaseManager:
         self.execute_query(query, (config_key, config_value, data_type, updated_by))
         
     def test_connection(self) -> bool:
-        """测试数据库连接"""
         try:
             with self.get_connection() as connection:
                 cursor = connection.cursor()
@@ -295,11 +256,9 @@ class DatabaseManager:
             return False
 
 
-# 全局数据库管理器实例
 _db_manager = None
 
 def get_db_manager() -> DatabaseManager:
-    """获取数据库管理器单例"""
     global _db_manager
     if _db_manager is None:
         _db_manager = DatabaseManager()

@@ -227,7 +227,7 @@ class BaseValidator:
         previous_hotkeys = self.hotkeys
 
         self.metagraph = self.subtensor.metagraph(self.config.netuid)
-        self.metagraph.sync(subtensor=self.subtensor)  # 同步最新状态
+        self.metagraph.sync(subtensor=self.subtensor)
         self.current_block = self.metagraph.block
 
         if previous_hotkeys == self.metagraph.hotkeys:

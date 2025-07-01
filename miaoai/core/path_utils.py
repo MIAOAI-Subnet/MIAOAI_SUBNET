@@ -16,7 +16,6 @@ class PathUtils:
         if task_data_path is None:
             task_data_path = os.getenv("TASK_DATA_PATH", "tasks/ecommerce_tasks.json")
             
-        # 确保使用相对路径
         if os.path.isabs(task_data_path):
             try:
                 task_data_path = str(Path(task_data_path).relative_to(root_dir))

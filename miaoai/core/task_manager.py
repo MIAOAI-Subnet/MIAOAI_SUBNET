@@ -138,7 +138,6 @@ class TaskManager:
             self.file_task_counts = state.get("file_task_counts", {})
             self.total_blocks_run = state.get("total_blocks_run", 0)
             
-            # 恢复任务完成状态
             completed_tasks = state.get("completed_tasks", {})
             for task_id, completed in completed_tasks.items():
                 if task_id in self.task_pool:
