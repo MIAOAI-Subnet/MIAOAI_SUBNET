@@ -187,7 +187,7 @@ class BaseValidator:
 
         self.metagraph = self.subtensor.metagraph(self.config.netuid)
         self.metagraph_info = self.subtensor.get_metagraph_info(self.config.netuid)
-        self.metagraph.sync(subtensor=self.subtensor)  # 同步最新状态
+        self.metagraph.sync(subtensor=self.subtensor)
 
         if self.wallet.hotkey.ss58_address not in self.metagraph.hotkeys:
             logging.error(

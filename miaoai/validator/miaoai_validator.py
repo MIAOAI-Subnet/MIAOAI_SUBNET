@@ -84,7 +84,7 @@ class MiaoAIValidator(BaseValidator):
 
         self.blocks_since_last_weights = 0
 
-        self.weights_interval = self.tempo * (1/3) # 120 blocks
+        self.weights_interval = self.tempo * (1/3)
         self.miner_tasks: Dict[str, str] = {}
 
         if not self.config.neuron.axon_off:
@@ -713,7 +713,6 @@ class MiaoAIValidator(BaseValidator):
         rows = []
         headers = ["UID", "Hotkey", "Weight", "Normalized (%)"]
 
-        # 按权重排序
         sorted_pairs = sorted(zip(indices, weights), key=lambda x: x[1], reverse=True)
         
         for idx, weight in sorted_pairs:

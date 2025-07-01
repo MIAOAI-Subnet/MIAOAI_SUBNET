@@ -211,7 +211,7 @@ class MiaoAIMiner(BaseMiner):
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 probabilities = torch.nn.functional.softmax(outputs.logits, dim=-1)
-                sentiment_score = probabilities[0][1].item()  # 积极情感的概率
+                sentiment_score = probabilities[0][1].item()
                 
             return {
                 "sentiment_score": sentiment_score,
