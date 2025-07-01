@@ -175,7 +175,6 @@ class MiaoAIValidator(BaseValidator):
         )
         
         self.current_allocations = allocations
-        # logging.info(f"current_allocations is:  {self.current_allocations}")
 
         return allocations
         
@@ -613,8 +612,6 @@ class MiaoAIValidator(BaseValidator):
                     is_active = bool(neuron.active)
                     stake = float(neuron.stake)
 
-                    # if is_validator:
-                    #     continue
 
                     if CHECK_NODE_ACTIVE and not is_active:
                         continue
@@ -736,7 +733,6 @@ class MiaoAIValidator(BaseValidator):
             numalign="right",
             stralign="left"
         )
-        # logging.info(f"Weight distribution at block {self.current_block}:\n{table}")
 
     def get_subnet_owner_uid(self) -> Optional[int]:
         try:

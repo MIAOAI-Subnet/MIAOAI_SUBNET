@@ -54,7 +54,7 @@ class HardwareChecker:
             
         if check_config["check_gpu_memory"]:
             try:
-                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3  # 转换为 GB
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
                 if gpu_memory < HardwareChecker.RECOMMENDED_SPECS["gpu_memory"]:
                     results["gpu_memory"] = f"GPU memory {gpu_memory:.1f}GB is lower than recommended {HardwareChecker.RECOMMENDED_SPECS['gpu_memory']}GB"
                     passed = False

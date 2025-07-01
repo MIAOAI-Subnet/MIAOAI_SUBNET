@@ -75,7 +75,6 @@ class ValidatorWhitelistManager:
                 cache_duration=data.get('cache_duration', 300)
             )
         except Exception as e:
-            # logging.error(f"Failed to load validator config from cache: {e}")
             return None
             
     def _save_to_cache(self, config: ValidatorListConfig) -> None:
@@ -124,15 +123,10 @@ class ValidatorWhitelistManager:
             
             self._save_to_cache(config)
             
-            # logging.info(f"Successfully fetched validator config from server: "
-            #             f"{len(config.whitelist)} whitelist, "
-            #             f"{len(config.blacklist)} blacklist, "
-            #             f"penalty coefficient: {config.penalty_coefficient}")
-            
+
             return config
             
         except Exception as e:
-            # logging.error(f"Failed to fetch validator config from server: {e}")
             return None
             
     def _load_from_database(self) -> Optional[ValidatorListConfig]:
@@ -210,9 +204,7 @@ class ValidatorWhitelistManager:
         blacklist_set = set(config.blacklist)
         
         filtered = [v for v in all_validators if v not in blacklist_set]
-        
-        # if len(filtered) != len(all_validators):
-            # logging.info(f"Filtered out {len(all_validators) - len(filtered)} blacklisted validators")
+
             
         return filtered
         
@@ -227,10 +219,6 @@ class ValidatorWhitelistManager:
             return original_score
             
         penalized_score = original_score * config.penalty_coefficient
-        
-        # logging.debug(f"Applied penalty to validator {validator_hotkey}: "
-        #              f"{original_score:.4f} -> {penalized_score:.4f} "
-        #              f"(coefficient: {config.penalty_coefficient})")
         
         return penalized_score
         
@@ -275,7 +263,6 @@ class ValidatorWhitelistManager:
             
             self._cached_config = None
             
-            # logging.info(f"Added validator {validator_hotkey} to whitelist")
             return True
             
         except Error as e:

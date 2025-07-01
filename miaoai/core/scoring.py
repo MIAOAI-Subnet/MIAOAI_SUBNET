@@ -87,7 +87,7 @@ class ScoringSystem:
 
         performance = self.performance_history[validator_hotkey][-1]
 
-        base_reward = min(1.0, blocks_completed / (720 * 2))  # 使用两个epoch(720*2)作为基准
+        base_reward = min(1.0, blocks_completed / (720 * 2))
 
         quality_bonus = performance.quality_score * self.config.quality_bonus_ratio
 

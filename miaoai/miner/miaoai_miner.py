@@ -242,7 +242,6 @@ class MiaoAIMiner(BaseMiner):
             }
             
         except Exception as e:
-            # logging.error(f"Error in scene understanding: {str(e)}")
             return {"error": str(e)}
             
     def _process_object_detection(self, task: Dict[str, Any]) -> Dict[str, Any]:
@@ -402,18 +401,15 @@ class MiaoAIMiner(BaseMiner):
 
                     validator_hotkey = self.metagraph.hotkeys[idx]
                     if self.whitelist_manager.is_validator_blacklisted(validator_hotkey):
-                        # logging.debug(f"Skipping blacklisted validator: {validator_hotkey}")
                         continue
 
                     normalized_trust = trust / U16_MAX
                     validators.append((idx, normalized_trust, stake))
                     
                 except Exception as e:
-                    # logging.warning(f"Error checking validator {idx}: {str(e)}")
                     continue
                     
             if not validators:
-                # logging.warning("No eligible validators found")
                 return None
 
             validators.sort(key=lambda x: (x[1], x[2]), reverse=True)
@@ -425,7 +421,6 @@ class MiaoAIMiner(BaseMiner):
             return validator_hotkey
             
         except Exception as e:
-            # logging.error(f"Error getting priority validator: {str(e)}")
             return None
 
     def get_validator_stats(self, validator_hotkey: str) -> Optional[Dict]:

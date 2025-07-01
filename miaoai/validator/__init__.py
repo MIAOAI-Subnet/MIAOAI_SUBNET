@@ -360,7 +360,6 @@ class BaseValidator:
             rows, headers=headers, tablefmt="grid", numalign="right", stralign="left"
         )
         title = f"Weights set at Block: {self.current_block}"
-        # logging.info(f"{title}\n{table}")
 
     def _log_scores(self, coin: str, hash_price: float) -> None:
         rows = []

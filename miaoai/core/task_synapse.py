@@ -41,7 +41,6 @@ class TaskSynapse(bt.Synapse):
             'validator_hotkey': self.validator_hotkey,
             'timestamp': self.timestamp,
             
-            # 状态同步字段
             'miner_uid': self.miner_uid,
             'miner_history': self.miner_history,
             'total_tasks_completed': self.total_tasks_completed,
