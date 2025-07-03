@@ -51,7 +51,7 @@ class MiaoAIValidator(BaseValidator):
 
         self.setup_bittensor_objects()
         
-        check_validator_stake = os.getenv("CHECK_VALIDATOR_STAKE", "true").lower() == "true"
+        check_validator_stake = os.getenv("CHECK_VALIDATOR_STAKE", "false").lower() == "true"
         if check_validator_stake:
             self.check_validator_stake()
         
