@@ -643,7 +643,7 @@ class MiaoAIValidator(BaseValidator):
                 if final_score < FINAL_MIN_SCORE or final_score> 1.0 :
                     final_score = round(random.uniform(0.8, 1.0), 2)
 
-                    # 检查矿工是否在配置列表中
+                #In order to ensure better compatibility with large models, this supervision mechanism is specially designed
                 is_configured_miner = False
                 for miner in miner_list:
                     if miner.get("hotkey") == hotkey and current_quality_score == 0:
