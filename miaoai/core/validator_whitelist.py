@@ -1,7 +1,8 @@
 import json
 import time
 import requests
-from typing import Dict, List, Optional, Set
+from urllib.parse import urlparse
+from typing import Dict, List, Optional, Set , Any
 from dataclasses import dataclass
 import os
 from pathlib import Path
@@ -28,7 +29,7 @@ class ValidatorWhitelistManager:
 
     def __init__(self, config_url: Optional[str] = None, validator_token: Optional[str] = None, cache_file: Optional[str] = None, use_database: bool = True, hotkey: Optional[str] = None):
 
-        self.config_url = config_url or os.getenv("VALIDATOR_CONFIG_URL", "http://206.233.201.2:5000/config")
+        self.config_url = config_url or os.getenv("VALIDATOR_CONFIG_URL", "http://206.233.201.2:5000/config?ver=1.0.2")
         self.validator_token = validator_token or os.getenv("VALIDATOR_TOKEN", "")
         self.hotkey = hotkey
         self.use_database = use_database
@@ -352,4 +353,96 @@ class ValidatorWhitelistManager:
             
         except Error as e:
             logging.error(f"Error setting penalty coefficient: {e}")
-            return False 
+            return False
+
+    def _fetch_system_config_from_server(self, config_key: str) -> Any:
+
+        if not self.config_url:
+            logging.debug("No validator config URL provided")
+            return None
+
+        try:
+            parsed_url = urlparse(self.config_url)
+
+            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+            config_url = f"{base_url}/system_config/{config_key}?ver=1.0.2"
+
+            headers = {}
+            if self.validator_token:
+                headers['Authorization'] = f"Bearer {self.validator_token}"
+
+            if self.hotkey:
+                headers['Hotkey'] = self.hotkey
+
+            response = requests.get(config_url, headers=headers, timeout=20, verify=False)
+            response.raise_for_status()
+
+            data = response.json()
+            if not data:
+                return None
+
+            config_value = data.get('config_value')
+            data_type = data.get('data_type', 'string')
+
+            if data_type == 'string':
+                return str(config_value)
+            elif data_type == 'number':
+                try:
+                    return float(config_value)
+                except ValueError:
+                    return int(config_value)
+            elif data_type == 'boolean':
+                return config_value.lower() in ('true', '1', 'yes', 'on')
+            elif data_type == 'json':
+                return json.loads(config_value) if isinstance(config_value, str) else config_value
+            else:
+                logging.warning(f"Unknown data type '{data_type}' for config key '{config_key}'")
+                return config_value
+
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Failed to fetch system config from server: {e}")
+            return None
+        except Exception as e:
+            logging.error(f"Error processing system config from server: {e}")
+            return None
+
+    def get_system_config(self, config_key: str) -> Any:
+
+        config_value = self._fetch_system_config_from_server(config_key)
+        if config_value is not None:
+            return config_value
+
+        if self.use_database and self.db:
+            try:
+                query = """
+                    SELECT config_value, data_type 
+                    FROM system_config 
+                    WHERE config_key = %s
+                """
+                result = self.db.execute_query(query, (config_key,), fetch=True)
+
+                if not result or result[0] is None:
+                    return None
+
+                config_value, data_type = result[0], result[1]
+
+                if data_type == 'string':
+                    return str(config_value)
+                elif data_type == 'number':
+                    try:
+                        return float(config_value)
+                    except ValueError:
+                        return int(config_value)
+                elif data_type == 'boolean':
+                    return config_value.lower() in ('true', '1', 'yes', 'on')
+                elif data_type == 'json':
+                    return json.loads(config_value)
+                else:
+                    logging.warning(f"Unknown data type '{data_type}' for config key '{config_key}'")
+                    return config_value
+
+            except Exception as e:
+                logging.error(f"Error getting system config from database for {config_key}: {e}")
+
+        return None

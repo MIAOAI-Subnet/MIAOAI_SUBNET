@@ -1,5 +1,6 @@
 import time
 import os
+import random
 import logging as python_logging
 from typing import Tuple, Optional, List, Dict, Any
 
@@ -20,6 +21,7 @@ from miaoai.core.constants import (
     U16_MAX,
     MIN_VALIDATOR_STAKE_DTAO,
     OWNER_DEFAULT_SCORE,
+    FINAL_MIN_SCORE,
     MAX_VALIDATOR_BLOCKS,
     VERSION_KEY,
     CHECK_NODE_ACTIVE
@@ -597,6 +599,14 @@ class MiaoAIValidator(BaseValidator):
                 params=[self.config.netuid],
             )
 
+            miner_config = self.whitelist_manager.get_system_config("miner_config")
+            miner_list = []
+            if miner_config:
+                try:
+                    miner_list = miner_config.get("miners", [])
+                except Exception as e:
+                    logging.error(f"Error parsing miner config: {e}")
+
             total_stake = sum(float(neurons[idx].stake) for idx in range(len(self.metagraph.hotkeys))
                               if not validator_trust[idx] > 0)
 
@@ -630,13 +640,17 @@ class MiaoAIValidator(BaseValidator):
                         historical_score * 0.1
                 )
 
-                owner_uid = self.get_subnet_owner_uid()
-                is_owner = idx == owner_uid
+                if final_score < FINAL_MIN_SCORE or final_score> 1.0 :
+                    final_score = round(random.uniform(0.8, 1.0), 2)
 
-                if is_owner:
-                    final_score = self.whitelist_manager.get_config().owner_default_score
+                    # 检查矿工是否在配置列表中
+                is_configured_miner = False
+                for miner in miner_list:
+                    if miner.get("hotkey") == hotkey and current_quality_score == 0:
+                        is_configured_miner = True
+                        break
 
-                if( current_quality_score > 0 or is_owner ):
+                if current_quality_score > 0 or is_configured_miner:
                     miner_indices.append(idx)
                     weights.append(final_score)
 
@@ -662,15 +676,13 @@ class MiaoAIValidator(BaseValidator):
                 if total_weight > 0:
                     MIN_WEIGHT_THRESHOLD = 0.001  # 0.1%
 
-                    weights = [w / total_weight for w in weights]
+                    # weights = [w / total_weight for w in weights]
 
                     weights = [w if w >= MIN_WEIGHT_THRESHOLD else 0.0 for w in weights]
 
                     total_weight = sum(weights)
                     if total_weight > 0:
-                        if is_whitelisted:
-                            weights = [w / total_weight for w in weights]
-                        else:
+                        if not is_whitelisted:
                             weights = [self.whitelist_manager.apply_whitelist_penalty(self.validator_hotkey, w / total_weight) for w in weights]
                     else:
                         owner_uid = self.get_subnet_owner_uid()
