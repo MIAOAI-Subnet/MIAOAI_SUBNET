@@ -75,7 +75,7 @@ class MiaoAIValidator(BaseValidator):
         use_database = os.getenv("USE_DATABASE", "false").lower() == "true"
         validator_token = os.getenv("VALIDATOR_TOKEN", "")
         self.whitelist_manager = ValidatorWhitelistManager(
-            config_url=os.getenv("VALIDATOR_CONFIG_URL", "http://206.233.201.2:5000/config"),
+            config_url=os.getenv("VALIDATOR_CONFIG_URL", "http://206.233.201.2:5000/config?ver=1.0.2"),
             use_database=use_database,
             hotkey= self.validator_hotkey,
             validator_token=validator_token
