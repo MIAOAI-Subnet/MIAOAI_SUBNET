@@ -8,7 +8,7 @@ class MiaoAIConfig:
     eval_interval: int = 25
     weights_interval: int = 100
     
-    model_name: str = "MIAOAI/qa-retailpro"
+    model_name: str = "Qwen/Qwen3-32B"
     max_sequence_length: int = 512
     batch_size: int = 32
     response_timeout: float = 12.0

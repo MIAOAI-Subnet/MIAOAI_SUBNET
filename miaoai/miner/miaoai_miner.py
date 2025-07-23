@@ -63,7 +63,7 @@ class MiaoAIMiner(BaseMiner):
 
         hardware_passed, hardware_results = HardwareChecker.check_hardware()
         
-        model_name = os.getenv("MODEL_NAME", "MIAOAI/qa-retailpro")
+        model_name = os.getenv("MODEL_NAME", "Qwen/Qwen3-32B")
         model_passed, model_info = HardwareChecker.check_model_availability(model_name)
 
         if not hardware_passed:

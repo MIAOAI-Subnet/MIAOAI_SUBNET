@@ -192,6 +192,7 @@ class MiaoAIValidator(BaseValidator):
                 return 0.0, 0.0
             
             is_valid = False
+
             if signature is not None and timestamp != 0:
                 is_valid = True
 
