@@ -106,12 +106,12 @@ pm2 startup
 2. Start the miner
 ```bash
 # Using .env file
-pm2 start python3 --name "miaoai-miner" -- miaoai/miner/miaoai_miner.py run \
+pm2 start python3 --name "miaoai-miner" -- miaoai/miner/miaoai_miner.1.py run \
     --subtensor.network finney \
     --logging.info
 
 # Using command-line arguments
-pm2 start python3 --name "miaoai-miner" -- miaoai/miner/miaoai_miner.py run \
+pm2 start python3 --name "miaoai-miner" -- miaoai/miner/miaoai_miner.1.py run \
     --netuid 86 \
     --subtensor.network finney \
     --wallet.name YOUR_WALLET_NAME \
@@ -120,7 +120,7 @@ pm2 start python3 --name "miaoai-miner" -- miaoai/miner/miaoai_miner.py run \
     --logging.info
 
 # Or without PM2
-python3 miaoai/miner/miaoai_miner.py run \
+python3 miaoai/miner/miaoai_miner.1.py run \
     --netuid 86 \
     --subtensor.network finney \
     --wallet.name YOUR_WALLET_NAME \

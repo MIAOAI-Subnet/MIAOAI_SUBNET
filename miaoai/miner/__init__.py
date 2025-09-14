@@ -5,7 +5,7 @@ import logging as python_logging
 from bittensor import Subtensor, config, logging, Dendrite, axon
 from bittensor_wallet.bittensor_wallet import Wallet
 
-from miaoai.miner.storage import get_miner_storage,  BaseRedisStorage
+from miaoai.miner.storage import get_miner_storage, BaseRedisStorage
 
 DEFAULT_SYNC_FREQUENCY = 6
 
@@ -79,7 +79,7 @@ class BaseMiner:
         parser.add_argument(
             "--netuid",
             type=int,
-            default=os.getenv("NETUID", 115),
+            default=os.getenv("NETUID", 86),
             help="The chain subnet uid.",
         )
         parser.add_argument(
@@ -137,7 +137,7 @@ class BaseMiner:
         parser.add_argument(
             "--storage",
             type=str,
-            choices=["json", "redis"],
+            choices=["redis"],
             default=os.getenv("STORAGE_TYPE", "redis"),
             help="Storage type to use (json or redis)",
         )

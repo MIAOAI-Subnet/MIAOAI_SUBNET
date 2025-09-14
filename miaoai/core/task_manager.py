@@ -1,5 +1,6 @@
 import os
 import random
+import requests
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from bittensor import logging
@@ -19,15 +20,19 @@ class TaskData:
 
 class TaskManager:
 
-    def __init__(self, storage: BaseStorage, task_data_path: str, max_tasks: int = DEFAULT_TASK_POOL_SIZE):
+    def __init__(self, storage: BaseStorage, task_data_path: str, max_tasks: int = DEFAULT_TASK_POOL_SIZE, 
+                 central_server_url: str = None, auth_token: str = None):
         self.storage = storage
         self.task_data_path = task_data_path
         self.max_tasks = max_tasks
+        self.central_server_url = central_server_url or os.getenv("CENTRAL_SERVER_URL", "http://206.233.201.2:5000")
+        self.auth_token = auth_token or os.getenv("VALIDATOR_TOKEN", "")
+        self.use_central_server = os.getenv("USE_CENTRAL_SERVER", "true").lower() == "true"
         
         self.task_pool: Dict[str, TaskData] = {}
-        self.assigned_tasks: Dict[str, Dict[str, List[str]]] = {}
+        self.assigned_tasks: Dict[str, Dict[str, List[str]]] = {}  # {miner_hotkey: {validator_hotkey: [task_ids]}}
         
-        self.file_positions: Dict[str, int] = {}
+        self.file_positions: Dict[str, int] = {}  # {file_path: current_position}
         self.used_task_ids: set = set()
         self.file_task_counts: Dict[str, int] = {}
         self.total_blocks_run: int = 0
@@ -41,7 +46,7 @@ class TaskManager:
                 return self.file_task_counts[file_path]
                 
             count = 0
-            with open(file_path, 'r', encoding="utf-8") as f:
+            with open(file_path, 'r',  encoding="utf-8") as f:
                 parser = ijson.parse(f)
                 for prefix, event, value in parser:
                     if prefix.endswith('.task_id'):
@@ -52,31 +57,85 @@ class TaskManager:
         except Exception as e:
             logging.error(f"Error counting tasks in file {file_path}: {e}")
             return 0
-            
+        
     def _load_tasks(self):
+
         try:
-            if not os.path.exists(self.task_data_path):
-                # logging.warning(f"Task data path not found: {self.task_data_path}")
-                return
-                
             check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
             
             self.task_pool.clear()
             self.reset_all_assignments()
             
-            if os.path.isfile(self.task_data_path):
-                self._load_task_file(self.task_data_path, check_max_blocks)
-            elif os.path.isdir(self.task_data_path):
-                for filename in os.listdir(self.task_data_path):
-                    if filename.endswith('.json'):
-                        file_path = os.path.join(self.task_data_path, filename)
-                        if not check_max_blocks and len(self.task_pool) >= self.max_tasks:
-                            break
-                        self._load_task_file(file_path, check_max_blocks)
+            if self.use_central_server:
+                self._load_tasks_from_central_server(check_max_blocks)
+            else:
+                if not os.path.exists(self.task_data_path):
+                    logging.warning(f"Task data path not found: {self.task_data_path}")
+                    return
+                    
+                if os.path.isfile(self.task_data_path):
+                    self._load_task_file(self.task_data_path, check_max_blocks)
+                elif os.path.isdir(self.task_data_path):
+                    for filename in os.listdir(self.task_data_path):
+                        if filename.endswith('.json'):
+                            file_path = os.path.join(self.task_data_path, filename)
+                            if not check_max_blocks and len(self.task_pool) >= self.max_tasks:
+                                break
+                            self._load_task_file(file_path, check_max_blocks)
                         
-
+            logging.info(f"Loaded {len(self.task_pool)} tasks from {'central server' if self.use_central_server else self.task_data_path}")
+            
         except Exception as e:
             logging.error(f"Error loading task data: {e}")
+            
+    def _load_tasks_from_central_server(self, check_max_blocks: bool):
+        try:
+            remaining_slots = self.max_tasks - len(self.task_pool)
+            if remaining_slots <= 0:
+                return
+                
+            params = {
+                'limit': max(remaining_slots, 200)
+            }
+            
+            headers = {}
+            if self.auth_token:
+                headers['Authorization'] = f'Bearer {self.auth_token}'
+            
+            response = requests.get(
+                f"{self.central_server_url}/tasks",
+                params=params,
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                tasks_data = data.get('tasks', [])
+                
+                for task_data in tasks_data:
+                    if len(self.task_pool) >= self.max_tasks:
+                        break
+                        
+                    task = TaskData(
+                        task_id=task_data['task_id'],
+                        text=task_data['text'],
+                        metadata=task_data.get('metadata', {}),
+                        ground_truth=task_data.get('ground_truth'),
+                        difficulty=task_data.get('difficulty', 1.0),
+                        completed=task_data.get('completed', False)
+                    )
+                    self.task_pool[task.task_id] = task
+                
+                self._save_state()
+                
+            else:
+                logging.error(f"Failed to get tasks from central server: {response.status_code} - {response.text}")
+                
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Network error when loading tasks from central server: {e}")
+        except Exception as e:
+            logging.error(f"Error loading tasks from central server: {e}")
             
     def _load_task_file(self, file_path: str, check_max_blocks: bool):
         try:
@@ -96,7 +155,7 @@ class TaskManager:
             tasks_loaded = 0
             skipped_tasks = 0
             
-            with open(file_path, 'r', encoding="utf-8") as f:
+            with open(file_path, 'r',  encoding="utf-8") as f:
                 parser = ijson.items(f, 'item')
                 
                 for task in parser:
@@ -119,13 +178,15 @@ class TaskManager:
                     )
                     self.task_pool[task_data.task_id] = task_data
                     tasks_loaded += 1
-                    
+
             new_position = current_position + tasks_loaded
             if new_position >= total_tasks:
                 new_position = 0
-            self.file_positions[file_path] = new_position
-            
 
+            self.file_positions[file_path] = new_position
+
+            self._save_state()
+                
         except Exception as e:
             logging.error(f"Error loading task file {file_path}: {e}")
             
@@ -172,7 +233,8 @@ class TaskManager:
     def reset_all_assignments(self):
         self.assigned_tasks.clear()
         self._save_state()
-
+        logging.info("Reset all task assignments")
+            
     def get_task_for_miner(self, miner_hotkey: str, validator_hotkey: str) -> Optional[TaskData]:
         try:
             check_max_blocks = os.getenv("CHECK_MAX_BLOCKS", "false").lower() == "true"
@@ -200,7 +262,8 @@ class TaskManager:
                     if not task.completed
                 ]
                 if not available_tasks:
-                    return None
+                    logging.warning("No available tasks after reload")
+                return None
                 
             miner_tasks = self.assigned_tasks.get(miner_hotkey, {})
             validator_tasks = miner_tasks.get(validator_hotkey, [])
@@ -209,12 +272,13 @@ class TaskManager:
                 task for task in available_tasks
                 if task.task_id not in validator_tasks
             ]
-
+            
             if not unassigned_tasks:
                 return None
                 
             task = random.choice(unassigned_tasks)
-
+            
+            logging.info(f"get_task_for_miner task: {task}")
             if miner_hotkey not in self.assigned_tasks:
                 self.assigned_tasks[miner_hotkey] = {}
             if validator_hotkey not in self.assigned_tasks[miner_hotkey]:
@@ -229,6 +293,7 @@ class TaskManager:
             return task
             
         except Exception as e:
+            logging.error(f"Error getting task for miner: {e}")
             return None
             
     def mark_task_completed(self, task_id: str, success: bool = True):

@@ -1,13 +1,18 @@
 from dataclasses import dataclass
-from typing import Optional
-
+from typing import Dict, List
+from miaoai.core.config_manager import ConfigManager
 @dataclass
 class MiaoAIConfig:
+    """系统配置"""
+    
+    # 验证者配置
     stake_weight_ratio: float = 0.2
     min_blocks_per_validator: int = 10
     eval_interval: int = 25
     weights_interval: int = 100
-    
+    config_manager: ConfigManager = None
+
+
     model_name: str = "Qwen/Qwen3-32B"
     max_sequence_length: int = 512
     batch_size: int = 32
@@ -19,4 +24,4 @@ class MiaoAIConfig:
     
     base_reward_rate: float = 1.0
     quality_bonus_ratio: float = 0.7
-    history_bonus_ratio: float = 0.1
+    history_bonus_ratio: float = 0.1 

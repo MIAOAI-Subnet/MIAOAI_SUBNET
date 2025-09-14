@@ -63,7 +63,7 @@ class BaseValidator:
         parser.add_argument(
             "--netuid",
             type=int,
-            default=os.getenv("NETUID", TESTNET_NETUID),
+            default=os.getenv("NETUID", 86),
             help="The chain subnet uid.",
         )
         parser.add_argument(
@@ -174,21 +174,42 @@ class BaseValidator:
                 logging.error()
             elif self.config.logging.level == "CRITICAL":
                 logging.critical()
-        
+
         python_logging.getLogger("bittensor").setLevel(
             getattr(python_logging, self.config.logging.level)
         )
 
+
     def setup_bittensor_objects(self) -> None:
+        """
+        Setup Bittensor objects.
+        1. Initialize wallet.
+        2. Initialize subtensor.
+        3. Initialize metagraph.
+        4. Ensure validator is registered to the network.
+        """
+        # Build Bittensor validator objects.
+        logging.info("Setting up Bittensor objects.")
 
+        # Initialize wallet.
         self.wallet = Wallet(config=self.config)
+        logging.info(f"Wallet: {self.wallet}")
 
+        # Initialize subtensor.
         self.subtensor = Subtensor(config=self.config)
+        logging.info(f"Subtensor: {self.subtensor}")
 
+        # Initialize metagraph.
         self.metagraph = self.subtensor.metagraph(self.config.netuid)
         self.metagraph_info = self.subtensor.get_metagraph_info(self.config.netuid)
-        self.metagraph.sync(subtensor=self.subtensor)
+        self.metagraph.sync(subtensor=self.subtensor)  # 同步最新状态
+        logging.info(f"Metagraph: "
+                     f"<netuid:{self.metagraph.netuid}, "
+                     f"n:{len(self.metagraph.axons)}, "
+                     f"block:{self.metagraph.block}, "
+                     f"network: {self.subtensor.network}>")
 
+        # Connect the validator to the network.
         if self.wallet.hotkey.ss58_address not in self.metagraph.hotkeys:
             logging.error(
                 f"\nYour validator: {self.wallet}"
@@ -197,8 +218,10 @@ class BaseValidator:
             )
             exit()
         else:
+            # Each validator gets a unique identity (UID) in the network.
             self.uid = self.metagraph.hotkeys.index(self.wallet.hotkey.ss58_address)
             self.validator_hotkey = self.wallet.hotkey.ss58_address
+            logging.info(f"Running validator on uid: {self.uid}")
 
         self.current_block = self.metagraph.block
         self.hotkeys = self.metagraph.hotkeys
@@ -213,6 +236,7 @@ class BaseValidator:
             logging.warning("axon off, not serving ip to chain.")
 
     def save_state(self) -> None:
+        """Save the current validator state to storage."""
         state = {
             "scores": self.scores,
             "moving_avg_scores": self.moving_avg_scores,
@@ -221,8 +245,15 @@ class BaseValidator:
             "current_block": self.current_block,
         }
         self.storage.save_state(state)
+        logging.info(f"Saved validator state at block {self.current_block}")
 
     def resync_metagraph(self) -> None:
+        """
+        Resyncs the metagraph and updates the score arrays to handle:
+        1. New registrations (metagraph size increase)
+        2. Hotkey replacements at existing UIDs
+        """
+        logging.info("Resyncing metagraph...")
 
         previous_hotkeys = self.hotkeys
 
@@ -238,6 +269,7 @@ class BaseValidator:
                 uid < len(self.metagraph.hotkeys)
                 and hotkey != self.metagraph.hotkeys[uid]
             ):
+
                 self.scores[uid] = 0.0
                 self.moving_avg_scores[uid] = 0.0
 
@@ -255,10 +287,19 @@ class BaseValidator:
             self.scores = new_scores
             self.moving_avg_scores = new_moving_avg
 
+            # Log new registrations
+            for uid in range(old_size, new_size):
+                logging.info(
+                    f"New registration at uid {uid}: {self.metagraph.hotkeys[uid]}"
+                )
+
         self.hotkeys = self.metagraph.hotkeys
         self.block_at_registration = self.metagraph.block_at_registration
 
     def get_burn_uid(self) -> Optional[int]:
+        """
+        Get the UID of the subnet owner.
+        """
         sn_owner_hotkey = self.subtensor.query_subtensor(
             "SubnetOwnerHotkey",
             params=[self.config.netuid],
@@ -267,12 +308,14 @@ class BaseValidator:
         return owner_uid
 
     def get_next_sync_block(self) -> tuple[int, str]:
+
         sync_reason = "Regular sync"
         next_sync = self.current_block + self.eval_interval
 
         blocks_since_last_weights = self.subtensor.blocks_since_last_update(
             self.config.netuid, self.uid
         )
+        # Calculate when we'll need to set weights
         blocks_until_weights = self.weights_interval - blocks_since_last_weights
         next_weights_block = self.current_block + blocks_until_weights + 1
 
@@ -293,11 +336,15 @@ class BaseValidator:
             params=[self.config.netuid],
         ).value
         if not validator_permits[self.uid]:
-            blocks_since_last_step = self.subtensor.query_subtensor(
-                "BlocksSinceLastStep",
-                block=self.current_block,
-                params=[self.config.netuid],
-            ).value
+            blocks_since_last_step = 0
+            try:
+                blocks_since_last_step = self.subtensor.query_subtensor(
+                    "BlocksSinceLastStep",
+                    block=self.current_block,
+                    params=[self.config.netuid],
+                ).value
+            except Exception as e:
+                logging.info(f"获取 BlocksSinceLastStep 失败: {e}")
             time_to_wait = (self.tempo - blocks_since_last_step) * BLOCK_TIME + 0.1
             logging.error(
                 f"Validator permit not found. Waiting {time_to_wait} seconds."
@@ -306,7 +353,6 @@ class BaseValidator:
             self.subtensor.wait_for_block(target_block)
 
     def serve_axon(self):
-
         try:
             if not self.config.axon.ip:
                 self.config.axon.ip = "0.0.0.0"
@@ -333,6 +379,7 @@ class BaseValidator:
             )
             pass
     def _log_weights_and_scores(self, weights: list[float]) -> None:
+
         rows = []
         headers = ["UID", "Hotkey", "Moving Avg", "Weight", "Normalized (%)"]
 
@@ -362,6 +409,7 @@ class BaseValidator:
         title = f"Weights set at Block: {self.current_block}"
 
     def _log_scores(self, coin: str, hash_price: float) -> None:
+        """Log current scores in a tabular format with hotkeys."""
         rows = []
         headers = ["UID", "Hotkey", "Score", "Moving Avg"]
 
@@ -382,6 +430,7 @@ class BaseValidator:
                 )
 
         if not rows:
+
             return
 
         table = tabulate(
