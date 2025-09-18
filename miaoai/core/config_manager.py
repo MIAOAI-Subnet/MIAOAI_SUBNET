@@ -32,7 +32,7 @@ class ConfigManager:
     def __init__(self, config_url: Optional[str] = None, validator_token: Optional[str] = None,
                  cache_file: Optional[str] = None, use_database: bool = True, hotkey: Optional[str] = None):
 
-        self.api_version = os.getenv("VALIDATOR_API_VERSION", "v1.0.2")
+        self.api_version = os.getenv("VALIDATOR_API_VERSION", "v1.0.3")
         self.config_url = config_url or os.getenv("VALIDATOR_CONFIG_URL", "http://206.233.201.2:5000/config")
         self.config_url = self.config_url + "?ver=" + self.api_version
         self.validator_token = validator_token or os.getenv("VALIDATOR_TOKEN", "")
