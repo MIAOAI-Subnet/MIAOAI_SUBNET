@@ -8,7 +8,7 @@ VERSION_KEY =2208
 
 U16_MAX = 65535
 
-DEFAULT_ALLOCATION_STRATEGY = "stake"  # Options: "stake", "equal"
+DEFAULT_ALLOCATION_STRATEGY = "equal"  # Options: "stake", "equal"
 
 DEFAULT_MODEL_NAME = "Qwen/Qwen3-32B"
 

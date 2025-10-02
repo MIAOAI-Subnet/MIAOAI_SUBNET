@@ -96,7 +96,7 @@ class TaskManager:
                 
             params = {
                 'limit': max(remaining_slots, 200),
-                'version': 'v1.0.3'
+                'version': 'v1.0.4'
             }
             
             headers = {}
